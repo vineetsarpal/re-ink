@@ -1,0 +1,36 @@
+# Core Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Database
+sqlalchemy==2.0.44  # Updated for Python 3.13 compatibility
+alembic==1.17.1  # Updated for compatibility with SQLAlchemy 2.0.44
+psycopg[binary]==3.2.12  # Modern PostgreSQL adapter with better Python 3.13 support
+
+# Validation
+pydantic==2.9.0  # Updated for better Python 3.13 support
+pydantic-settings==2.5.0
+email-validator==2.3.0  # Required for EmailStr validation
+
+# Document Processing
+python-docx==1.1.0
+PyPDF2==3.0.1
+pypdf==3.17.1
+
+# HTTP Client for API calls
+httpx==0.25.2
+aiofiles==23.2.1
+
+# Authentication & Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-dotenv==1.0.0
+
+# CORS
+fastapi-cors==0.0.6
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+httpx==0.25.2
