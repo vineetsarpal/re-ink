@@ -4,7 +4,7 @@ Loads settings from environment variables using pydantic-settings.
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
-from typing import List
+from typing import List, Optional
 
 
 class Settings(BaseSettings):
@@ -40,6 +40,12 @@ class Settings(BaseSettings):
 
     # Logging
     LOG_LEVEL: str = "INFO"
+
+    # Agent / LLM settings
+    OPENAI_API_KEY: Optional[str] = None
+    AGENT_MODEL: str = "gpt-4o-mini"
+    AGENT_TEMPERATURE: float = 0.1
+    AGENT_OFFLINE_MODE: bool = False
 
     model_config = SettingsConfigDict(
         env_file=".env",

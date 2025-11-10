@@ -94,6 +94,51 @@ export interface ReviewApprovalResponse {
   message: string;
 }
 
+export type AgentRole = 'system' | 'user' | 'assistant' | 'tool';
+
+export interface AgentChatMessage {
+  role: AgentRole;
+  content: string;
+}
+
+export interface GuidedIntakeAnalysis {
+  summary: string;
+  assistant_message: string;
+  missing_fields: string[];
+  clarifying_questions: string[];
+  recommended_next_steps: string[];
+  confidence?: number;
+}
+
+export interface GuidedIntakeResponse {
+  job_id: string;
+  status: 'ready' | 'awaiting_input' | 'job_not_ready' | 'error';
+  analysis?: GuidedIntakeAnalysis;
+  contract_data?: Record<string, any>;
+  parties_data: Record<string, any>[];
+  suggested_review_payload?: ReviewData;
+  messages: AgentChatMessage[];
+  errors: string[];
+}
+
+export interface ContractReviewAnalysis {
+  summary: string;
+  assistant_message: string;
+  risk_flags: string[];
+  recommended_actions: string[];
+  compliance_notes: string[];
+  confidence?: number;
+}
+
+export interface AutomatedReviewResponse {
+  contract_id: number;
+  status: 'complete' | 'not_found' | 'error';
+  analysis?: ContractReviewAnalysis;
+  contract_snapshot?: ContractWithParties;
+  messages: AgentChatMessage[];
+  errors: string[];
+}
+
 export type ContractStatus = 'draft' | 'pending_review' | 'active' | 'expired' | 'cancelled';
 export type ReviewStatus = 'pending' | 'approved' | 'rejected';
 export type PartyType = 'cedant' | 'reinsurer' | 'broker' | 'other';

@@ -4,9 +4,21 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Calendar, DollarSign, MapPin, FileText, Users, Edit2, Save, X, Trash2 } from 'lucide-react';
-import { contractApi } from '@/services/api';
-import type { ContractWithParties } from '@/types';
+import {
+  ArrowLeft,
+  Calendar,
+  DollarSign,
+  MapPin,
+  FileText,
+  Users,
+  Edit2,
+  Save,
+  X,
+  Trash2,
+  Sparkles,
+} from 'lucide-react';
+import { agentApi, contractApi } from '@/services/api';
+import type { AutomatedReviewResponse, ContractWithParties } from '@/types';
 
 export const ContractDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -14,6 +26,9 @@ export const ContractDetailPage: React.FC = () => {
   const queryClient = useQueryClient();
   const [isEditing, setIsEditing] = useState(false);
   const [editedData, setEditedData] = useState<Partial<ContractWithParties>>({});
+  const [isGeneratingReview, setIsGeneratingReview] = useState(false);
+  const [agentReview, setAgentReview] = useState<AutomatedReviewResponse | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
 
   const { data: contract, isLoading, error } = useQuery<ContractWithParties>({
     queryKey: ['contract', id],
@@ -72,6 +87,24 @@ export const ContractDetailPage: React.FC = () => {
       'This action cannot be undone. The contract will be marked as deleted.'
     )) {
       deleteMutation.mutate();
+    }
+  };
+
+  const handleGenerateReview = async () => {
+    setIsGeneratingReview(true);
+    setReviewError(null);
+    try {
+      const response = await agentApi.runContractReview(contract!.id);
+      setAgentReview(response);
+    } catch (error: any) {
+      console.error('Failed to generate automated review', error);
+      const detail =
+        error?.response?.data?.detail ??
+        error?.message ??
+        'Unable to generate AI review. Please try again later.';
+      setReviewError(detail);
+    } finally {
+      setIsGeneratingReview(false);
     }
   };
 
@@ -205,7 +238,7 @@ export const ContractDetailPage: React.FC = () => {
   };
 
   return (
-    <div className="contract-detail-page">
+      <div className="contract-detail-page">
       {/* Header */}
       <div className="page-header">
         <div>
@@ -265,6 +298,75 @@ export const ContractDetailPage: React.FC = () => {
           )}
         </div>
       </div>
+
+      <section className="detail-section full-width ai-review-section">
+        <div className="detail-section-header">
+          <h2>
+            <Sparkles size={18} />
+            AI Contract Review
+          </h2>
+          <button
+            className="btn btn-secondary"
+            onClick={handleGenerateReview}
+            disabled={isGeneratingReview}
+          >
+            <Sparkles size={16} />
+            {isGeneratingReview ? 'Generating Review...' : 'Generate AI Review'}
+          </button>
+        </div>
+        <p className="detail-subtitle">
+          Generate an automated risk and compliance summary for this contract on demand.
+        </p>
+
+        {reviewError && (
+          <div className="agent-panel__error" style={{ marginBottom: '1rem' }}>
+            {reviewError}
+          </div>
+        )}
+
+        {agentReview?.analysis ? (
+          <div className="agent-panel__body">
+            <p className="agent-panel__summary">{agentReview.analysis.assistant_message}</p>
+
+            {agentReview.analysis.risk_flags.length > 0 && (
+              <div className="agent-panel__section">
+                <h4>Risk Flags</h4>
+                <ul className="agent-panel__bullet-list">
+                  {agentReview.analysis.risk_flags.map((flag, index) => (
+                    <li key={index}>{flag}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {agentReview.analysis.recommended_actions.length > 0 && (
+              <div className="agent-panel__section">
+                <h4>Recommended Actions</h4>
+                <ul className="agent-panel__bullet-list">
+                  {agentReview.analysis.recommended_actions.map((action, index) => (
+                    <li key={index}>{action}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {agentReview.analysis.compliance_notes.length > 0 && (
+              <div className="agent-panel__section">
+                <h4>Compliance Notes</h4>
+                <ul className="agent-panel__bullet-list">
+                  {agentReview.analysis.compliance_notes.map((note, index) => (
+                    <li key={index}>{note}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="agent-panel__subtitle" style={{ marginTop: '1rem' }}>
+            No AI review has been generated yet. Click the button above to request one.
+          </p>
+        )}
+      </section>
 
       {/* Contract Information Grid */}
       <div className="detail-grid">

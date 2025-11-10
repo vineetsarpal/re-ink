@@ -1,9 +1,9 @@
 """
 API endpoints for document upload and extraction workflow.
 """
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks
+import uuid
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks, Body
 from sqlalchemy.orm import Session
-from typing import Dict, Any
 from datetime import datetime
 import logging
 
@@ -11,18 +11,14 @@ from app.db.database import get_db
 from app.schemas.document import (
     DocumentUploadResponse,
     DocumentExtractionStatus,
-    ReviewData,
-    ReviewApprovalResponse,
     ExtractionResult
 )
 from app.services.document_service import document_service
 from app.services.landingai_service import landingai_service
+from app.services.extraction_store import extraction_store
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-# In-memory storage for extraction jobs (in production, use Redis or database)
-extraction_jobs: Dict[str, Dict[str, Any]] = {}
 
 
 @router.post("/upload", response_model=DocumentUploadResponse)
@@ -52,13 +48,13 @@ async def upload_document(
         )
 
         # Store initial job status
-        extraction_jobs[file_info["job_id"]] = {
+        extraction_store.create_job(file_info["job_id"], {
             "status": "processing",
             "filename": file_info["filename"],
             "file_path": file_info["file_path"],
             "message": "Document uploaded and extraction started",
             "created_at": datetime.utcnow()
-        }
+        })
 
         return DocumentUploadResponse(
             job_id=file_info["job_id"],
@@ -84,7 +80,7 @@ async def process_document_extraction(file_path: str, job_id: str):
     """
     try:
         # Update job status to processing
-        extraction_jobs[job_id].update({
+        extraction_store.update_job(job_id, {
             "status": "processing",
             "message": "Processing document with LandingAI ADE Parse..."
         })
@@ -100,7 +96,7 @@ async def process_document_extraction(file_path: str, job_id: str):
         job_id_from_api = raw_results.get("metadata", {}).get("job_id")
         
         # Update job status with results
-        extraction_jobs[job_id].update({
+        extraction_store.update_job(job_id, {
             "status": "completed",
             "message": "Extraction completed successfully",
             "landingai_job_id": job_id_from_api,
@@ -113,7 +109,7 @@ async def process_document_extraction(file_path: str, job_id: str):
 
     except Exception as e:
         logger.error(f"Error processing document extraction: {str(e)}", exc_info=True)
-        extraction_jobs[job_id].update({
+        extraction_store.update_job(job_id, {
             "status": "failed",
             "message": f"Extraction failed: {str(e)}",
             "error": str(e),
@@ -130,10 +126,9 @@ async def get_extraction_status(job_id: str):
     - Job status (processing, completed, failed)
     - Extracted data if completed
     """
-    if job_id not in extraction_jobs:
+    job = extraction_store.get_job(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-
-    job = extraction_jobs[job_id]
 
     # If job is completed, use the parsed results
     result = None
@@ -157,7 +152,7 @@ async def get_extraction_status(job_id: str):
     if created_at is None:
         created_at = datetime.utcnow()
         # Update the job with created_at for future requests
-        extraction_jobs[job_id]["created_at"] = created_at
+        extraction_store.update_job(job_id, {"created_at": created_at})
     
     return DocumentExtractionStatus(
         job_id=job_id,
@@ -175,10 +170,9 @@ async def get_extraction_results(job_id: str):
 
     Returns structured contract and party data ready for review.
     """
-    if job_id not in extraction_jobs:
+    job = extraction_store.get_job(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-
-    job = extraction_jobs[job_id]
 
     if job["status"] != "completed":
         raise HTTPException(
@@ -211,26 +205,21 @@ async def delete_document(job_id: str):
     """
     Delete a document and its associated extraction data.
     """
-    if job_id not in extraction_jobs:
+    job = extraction_store.get_job(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-
-    job = extraction_jobs[job_id]
 
     # Delete the file
     document_service.delete_file(job["file_path"])
 
     # Remove job from tracking
-    del extraction_jobs[job_id]
+    extraction_store.delete_job(job_id)
 
     return {"message": "Document deleted successfully"}
 
 
-@router.get("/test-mock-data", response_model=ExtractionResult)
-async def get_mock_extraction_data():
-    """
-    Test endpoint that returns mock extraction data to verify frontend works correctly.
-    Useful for debugging the review form UI without needing actual document extraction.
-    """
+def _build_mock_extraction_result() -> ExtractionResult:
+    """Return a reusable mock extraction payload."""
     mock_data = {
         "contract_data": {
             "contract_number": "RC-2024-TEST-001",
@@ -300,3 +289,49 @@ async def get_mock_extraction_data():
     }
 
     return ExtractionResult(**mock_data)
+
+
+@router.get("/test-mock-data", response_model=ExtractionResult)
+async def get_mock_extraction_data():
+    """
+    Test endpoint that returns mock extraction data to verify frontend works correctly.
+    Useful for debugging the review form UI without needing actual document extraction.
+    """
+    return _build_mock_extraction_result()
+
+
+@router.post("/mock-job", response_model=DocumentExtractionStatus)
+async def seed_mock_extraction_job(job_id: str | None = Body(default=None, embed=True)):
+    """
+    Seed the extraction store with a completed mock job for offline testing.
+
+    Returns the job metadata so agents and review flows can be exercised without
+    triggering LandingAI.
+    """
+    job_id = job_id or str(uuid.uuid4())
+    mock_result = _build_mock_extraction_result()
+    created_at = datetime.utcnow()
+
+    extraction_store.create_job(
+        job_id,
+        {
+            "status": "completed",
+            "filename": mock_result.extraction_metadata.get("filename", "mock_contract.pdf")
+            if mock_result.extraction_metadata
+            else "mock_contract.pdf",
+            "file_path": f"/mock/{job_id}.pdf",
+            "message": "Mock extraction completed",
+            "parsed_results": mock_result.model_dump(),
+            "raw_results": mock_result.model_dump(),
+            "created_at": created_at,
+            "completed_at": created_at,
+        },
+    )
+
+    return DocumentExtractionStatus(
+        job_id=job_id,
+        status="completed",
+        message="Mock extraction job seeded for offline testing.",
+        result=mock_result,
+        created_at=created_at,
+    )
