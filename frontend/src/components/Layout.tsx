@@ -2,14 +2,10 @@
  * Layout component with navigation and header.
  */
 import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, Outlet } from 'react-router-dom';
 import { FileText, Upload, Users, LayoutDashboard } from 'lucide-react';
 
-interface LayoutProps {
-  children: React.ReactNode;
-}
-
-export const Layout: React.FC<LayoutProps> = ({ children }) => {
+export const Layout: React.FC = () => {
   const location = useLocation();
 
   const isActive = (path: string) => location.pathname === path;
@@ -19,8 +15,15 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       {/* Sidebar Navigation */}
       <nav className="sidebar">
         <div className="sidebar-header">
-          <h1 className="app-title">re-ink</h1>
-          <p className="app-subtitle">Contract Management</p>
+          <Link to="/" className="logo-link">
+            <div className="logo-icon">
+              <FileText size={28} strokeWidth={2.5} />
+            </div>
+            <div className="logo-text">
+              <h1 className="app-title">Re-ink</h1>
+              <p className="app-subtitle">AI-Powered Reinsurance</p>
+            </div>
+          </Link>
         </div>
 
         <ul className="nav-menu">
@@ -72,7 +75,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
       {/* Main Content Area */}
       <main className="main-content">
-        <div className="content-wrapper">{children}</div>
+        <div className="content-wrapper">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

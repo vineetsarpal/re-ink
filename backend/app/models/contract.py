@@ -32,7 +32,9 @@ class Contract(Base):
     # Contract Identification
     contract_number = Column(String(100), unique=True, nullable=False, index=True)
     contract_name = Column(String(255), nullable=False)
-    contract_type = Column(String(50))  # treaty, facultative, proportional, non-proportional
+    contract_type = Column(String(50))  # treaty, facultative
+    contract_sub_type = Column(String(100))  # quota_share, surplus, xol, facultative_obligatory, facultative_optional
+    contract_nature = Column(String(50))  # proportional, non-proportional
 
     # Contract Dates
     effective_date = Column(Date, nullable=False)

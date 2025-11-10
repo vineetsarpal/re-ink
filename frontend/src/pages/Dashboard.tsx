@@ -190,7 +190,7 @@ export const Dashboard: React.FC = () => {
             {parties.map((party) => (
               <div
                 key={party.id}
-                className="party-card"
+                className="party-card clickable"
                 onClick={() => navigate(`/parties/${party.id}`)}
               >
                 <h3>{party.name}</h3>

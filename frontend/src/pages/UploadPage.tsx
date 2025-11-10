@@ -34,11 +34,8 @@ export const UploadPage: React.FC = () => {
   };
 
   const handleApprove = (contractId: number, partyIds: number[]) => {
-    alert(
-      `Contract created successfully! Contract ID: ${contractId}, Party IDs: ${partyIds.join(
-        ', '
-      )}`
-    );
+    // Success message is now shown in ReviewForm
+    // Navigate to the newly created contract's detail page
     navigate(`/contracts/${contractId}`);
   };
 

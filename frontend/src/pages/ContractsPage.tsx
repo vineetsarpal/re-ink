@@ -36,6 +36,7 @@ export const ContractsPage: React.FC = () => {
     const matchesSearch =
       contract.contract_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
       contract.contract_name.toLowerCase().includes(searchTerm.toLowerCase());
+    // Show all contracts including inactive ones (is_active field will be indicated by badge)
     return matchesSearch;
   });
 
@@ -95,6 +96,7 @@ export const ContractsPage: React.FC = () => {
                 <th>Contract Number</th>
                 <th>Name</th>
                 <th>Type</th>
+                <th>Sub-Type</th>
                 <th>Status</th>
                 <th>Effective Date</th>
                 <th>Expiration Date</th>
@@ -113,9 +115,23 @@ export const ContractsPage: React.FC = () => {
                   <td>{contract.contract_name}</td>
                   <td>{contract.contract_type || 'N/A'}</td>
                   <td>
-                    <span className={`status-badge status-${contract.status}`}>
-                      {contract.status}
-                    </span>
+                    {contract.contract_sub_type ? (
+                      contract.contract_sub_type
+                        .split('_')
+                        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                        .join(' ')
+                    ) : 'N/A'}
+                  </td>
+                  <td>
+                    {!contract.is_active ? (
+                      <span className="badge badge-inactive">
+                        Inactive
+                      </span>
+                    ) : (
+                      <span className={`status-badge status-${contract.status}`}>
+                        {contract.status}
+                      </span>
+                    )}
                   </td>
                   <td>{new Date(contract.effective_date).toLocaleDateString()}</td>
                   <td>{new Date(contract.expiration_date).toLocaleDateString()}</td>

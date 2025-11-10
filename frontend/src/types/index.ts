@@ -27,6 +27,8 @@ export interface Contract {
   contract_number: string;
   contract_name: string;
   contract_type?: string;
+  contract_sub_type?: string;
+  contract_nature?: string;
   effective_date: string;
   expiration_date: string;
   inception_date?: string;
@@ -94,4 +96,4 @@ export interface ReviewApprovalResponse {
 
 export type ContractStatus = 'draft' | 'pending_review' | 'active' | 'expired' | 'cancelled';
 export type ReviewStatus = 'pending' | 'approved' | 'rejected';
-export type PartyType = 'cedent' | 'reinsurer' | 'broker' | 'other';
+export type PartyType = 'cedant' | 'reinsurer' | 'broker' | 'other';

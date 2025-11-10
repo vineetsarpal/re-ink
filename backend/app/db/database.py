@@ -7,6 +7,15 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 
+# Ensure psycopg is available for SQLAlchemy to use
+try:
+    import psycopg
+except ImportError:
+    raise ImportError(
+        "psycopg is required but not installed. "
+        "Install it with: pip install psycopg[binary]"
+    )
+
 # Ensure DATABASE_URL uses psycopg driver (for psycopg 3.x)
 database_url = settings.DATABASE_URL
 if database_url.startswith("postgresql://") and "+psycopg" not in database_url:

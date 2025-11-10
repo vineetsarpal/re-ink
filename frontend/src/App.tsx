@@ -4,10 +4,13 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { HomePage } from './pages/HomePage';
 import { Dashboard } from './pages/Dashboard';
 import { UploadPage } from './pages/UploadPage';
 import { ContractsPage } from './pages/ContractsPage';
+import { ContractDetailPage } from './pages/ContractDetailPage';
 import { PartiesPage } from './pages/PartiesPage';
+import { PartyDetailPage } from './pages/PartyDetailPage';
 import { Layout } from './components/Layout';
 import './styles/App.css';
 
@@ -25,16 +28,18 @@ const App: React.FC = () => {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <Layout>
-          <Routes>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route element={<Layout />}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/upload" element={<UploadPage />} />
             <Route path="/contracts" element={<ContractsPage />} />
+            <Route path="/contracts/:id" element={<ContractDetailPage />} />
             <Route path="/parties" element={<PartiesPage />} />
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
-        </Layout>
+            <Route path="/parties/:id" element={<PartyDetailPage />} />
+          </Route>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </BrowserRouter>
     </QueryClientProvider>
   );

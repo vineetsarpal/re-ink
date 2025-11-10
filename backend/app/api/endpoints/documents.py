@@ -4,6 +4,7 @@ API endpoints for document upload and extraction workflow.
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import Dict, Any
+from datetime import datetime
 import logging
 
 from app.db.database import get_db
@@ -55,7 +56,8 @@ async def upload_document(
             "status": "processing",
             "filename": file_info["filename"],
             "file_path": file_info["file_path"],
-            "message": "Document uploaded and extraction started"
+            "message": "Document uploaded and extraction started",
+            "created_at": datetime.utcnow()
         }
 
         return DocumentUploadResponse(
@@ -75,31 +77,47 @@ async def upload_document(
 
 async def process_document_extraction(file_path: str, job_id: str):
     """
-    Background task to process document extraction via LandingAI.
+    Background task to process document extraction via LandingAI ADE Parse API.
+    
+    ADE Parse is synchronous and returns results immediately, but processing
+    can take time, so we run it in a background task.
     """
     try:
-        # Submit to LandingAI
-        result = await landingai_service.submit_document_for_extraction(file_path)
-
-        # Update job status
+        # Update job status to processing
         extraction_jobs[job_id].update({
-            "landingai_job_id": result.get("job_id"),
-            "status": "submitted_to_ai",
-            "message": "Document submitted to AI extraction service"
+            "status": "processing",
+            "message": "Processing document with LandingAI ADE Parse..."
         })
 
-        # Poll for results (in production, use webhooks)
-        # For now, we'll mark as complete and store mock results
+        # Parse document using LandingAI ADE Parse API
+        # This is synchronous but may take time for large documents
+        raw_results = await landingai_service.submit_document_for_extraction(file_path)
+        
+        # Parse the results to extract contract and party data
+        parsed_results = landingai_service.parse_extraction_results(raw_results)
+        
+        # Extract job_id from metadata
+        job_id_from_api = raw_results.get("metadata", {}).get("job_id")
+        
+        # Update job status with results
         extraction_jobs[job_id].update({
             "status": "completed",
-            "message": "Extraction completed successfully"
+            "message": "Extraction completed successfully",
+            "landingai_job_id": job_id_from_api,
+            "raw_results": raw_results,  # Store raw results for reference
+            "parsed_results": parsed_results,  # Store parsed results
+            "completed_at": datetime.utcnow()
         })
+        
+        logger.info(f"Document extraction completed for job {job_id}")
 
     except Exception as e:
-        logger.error(f"Error processing document extraction: {str(e)}")
+        logger.error(f"Error processing document extraction: {str(e)}", exc_info=True)
         extraction_jobs[job_id].update({
             "status": "failed",
-            "message": f"Extraction failed: {str(e)}"
+            "message": f"Extraction failed: {str(e)}",
+            "error": str(e),
+            "failed_at": datetime.utcnow()
         })
 
 
@@ -117,27 +135,36 @@ async def get_extraction_status(job_id: str):
 
     job = extraction_jobs[job_id]
 
-    # If job is completed, fetch the actual results
+    # If job is completed, use the parsed results
     result = None
-    if job["status"] == "completed" and "landingai_job_id" in job:
+    if job["status"] == "completed" and "parsed_results" in job:
         try:
-            # Fetch results from LandingAI
-            raw_results = await landingai_service.get_extraction_results(
-                job["landingai_job_id"]
-            )
-            parsed_results = landingai_service.parse_extraction_results(raw_results)
-
+            # Use the parsed results stored in the job
+            parsed_results = job["parsed_results"]
             result = ExtractionResult(**parsed_results)
-
         except Exception as e:
-            logger.error(f"Error fetching extraction results: {str(e)}")
+            logger.error(f"Error creating ExtractionResult: {str(e)}")
+            # If parsing fails, try to parse from raw results
+            if "raw_results" in job:
+                try:
+                    parsed_results = landingai_service.parse_extraction_results(job["raw_results"])
+                    result = ExtractionResult(**parsed_results)
+                except Exception as parse_error:
+                    logger.error(f"Error parsing raw results: {str(parse_error)}")
 
+    # Ensure created_at is set, use current time if missing (shouldn't happen)
+    created_at = job.get("created_at")
+    if created_at is None:
+        created_at = datetime.utcnow()
+        # Update the job with created_at for future requests
+        extraction_jobs[job_id]["created_at"] = created_at
+    
     return DocumentExtractionStatus(
         job_id=job_id,
         status=job["status"],
         message=job.get("message"),
         result=result,
-        created_at=job.get("created_at")
+        created_at=created_at
     )
 
 
@@ -160,13 +187,19 @@ async def get_extraction_results(job_id: str):
         )
 
     try:
-        # Fetch and parse results
-        raw_results = await landingai_service.get_extraction_results(
-            job.get("landingai_job_id")
-        )
-        parsed_results = landingai_service.parse_extraction_results(raw_results)
-
-        return ExtractionResult(**parsed_results)
+        # Use the parsed results stored in the job
+        if "parsed_results" in job:
+            parsed_results = job["parsed_results"]
+            return ExtractionResult(**parsed_results)
+        elif "raw_results" in job:
+            # Parse from raw results if parsed results not available
+            parsed_results = landingai_service.parse_extraction_results(job["raw_results"])
+            return ExtractionResult(**parsed_results)
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="No results available for this job"
+            )
 
     except Exception as e:
         logger.error(f"Error retrieving extraction results: {str(e)}")
@@ -190,3 +223,80 @@ async def delete_document(job_id: str):
     del extraction_jobs[job_id]
 
     return {"message": "Document deleted successfully"}
+
+
+@router.get("/test-mock-data", response_model=ExtractionResult)
+async def get_mock_extraction_data():
+    """
+    Test endpoint that returns mock extraction data to verify frontend works correctly.
+    Useful for debugging the review form UI without needing actual document extraction.
+    """
+    mock_data = {
+        "contract_data": {
+            "contract_number": "RC-2024-TEST-001",
+            "contract_name": "Test Property Catastrophe Reinsurance Treaty",
+            "contract_type": "quota share",
+            "effective_date": "2024-01-01",
+            "expiration_date": "2024-12-31",
+            "inception_date": "2024-01-01",
+            "premium_amount": "1000000.00",
+            "currency": "USD",
+            "limit_amount": "5000000.00",
+            "retention_amount": "500000.00",
+            "commission_rate": "25.00",
+            "line_of_business": "property",
+            "coverage_territory": "United States",
+            "coverage_description": "Coverage for property damage from natural catastrophes including hurricanes, tornadoes, and wildfires",
+            "terms_and_conditions": "Standard reinsurance terms apply with quarterly reporting",
+            "special_provisions": "Coverage excludes flood and earthquake unless specifically endorsed"
+        },
+        "parties_data": [
+            {
+                "name": "ABC Insurance Company",
+                "party_type": "cedent",
+                "email": "contact@abcinsurance.com",
+                "phone": "+1-555-0100",
+                "address_line1": "123 Main Street",
+                "address_line2": "Suite 400",
+                "city": "New York",
+                "state": "NY",
+                "postal_code": "10001",
+                "country": "United States",
+                "registration_number": "12-3456789",
+                "license_number": "NY-123456"
+            },
+            {
+                "name": "XYZ Reinsurance Ltd",
+                "party_type": "reinsurer",
+                "email": "info@xyzre.com",
+                "phone": "+44-20-1234-5678",
+                "address_line1": "456 Financial District",
+                "city": "London",
+                "postal_code": "EC2N 2DB",
+                "country": "United Kingdom",
+                "registration_number": "UK-987654321",
+                "license_number": "FCA-654321"
+            },
+            {
+                "name": "Global Reinsurance Brokers",
+                "party_type": "broker",
+                "email": "brokers@globalrebrokers.com",
+                "phone": "+1-555-0200",
+                "address_line1": "789 Broker Lane",
+                "city": "Chicago",
+                "state": "IL",
+                "postal_code": "60601",
+                "country": "United States"
+            }
+        ],
+        "confidence_score": 0.92,
+        "extraction_metadata": {
+            "parse_job_id": "test-mock-job-123",
+            "filename": "test_contract.pdf",
+            "page_count": 15,
+            "parse_duration_ms": 3500,
+            "markdown_length": 25000
+        }
+    }
+
+    return ExtractionResult(**mock_data)

@@ -21,7 +21,10 @@ class Settings(BaseSettings):
 
     # LandingAI Configuration
     LANDINGAI_API_KEY: str
-    LANDINGAI_API_URL: str = "https://api.landing.ai/v1/agent/document-extraction"
+    LANDINGAI_PARSE_URL: str = "https://api.va.landing.ai/v1/ade/parse"
+    LANDINGAI_EXTRACT_URL: str = "https://api.va.landing.ai/v1/ade/extract"
+    LANDINGAI_PARSE_MODEL: str = "dpt-2-latest"
+    LANDINGAI_EXTRACT_MODEL: str = "extract-latest"
 
     # File Upload
     MAX_UPLOAD_SIZE: int = 52428800  # 50MB default
@@ -34,6 +37,9 @@ class Settings(BaseSettings):
 
     # Security
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+
+    # Logging
+    LOG_LEVEL: str = "INFO"
 
     model_config = SettingsConfigDict(
         env_file=".env",

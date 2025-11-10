@@ -76,7 +76,6 @@ backend/
 │   ├── services/         # Business logic
 │   └── main.py           # FastAPI application
 ├── alembic/              # Database migrations
-├── tests/                # Test files
 └── requirements.txt      # Python dependencies
 ```
 
@@ -124,25 +123,31 @@ Rollback:
 alembic downgrade -1
 ```
 
-## Testing
-
-Run tests:
-```bash
-pytest
-```
-
-With coverage:
-```bash
-pytest --cov=app tests/
-```
-
 ## Configuration
 
 Key environment variables:
 
 - `DATABASE_URL` - PostgreSQL connection string
 - `LANDINGAI_API_KEY` - LandingAI API key
-- `LANDINGAI_API_URL` - LandingAI API endpoint
+- `LANDINGAI_PARSE_URL` - LandingAI Parse API endpoint (default: https://api.va.landing.ai/v1/ade/parse)
+- `LANDINGAI_EXTRACT_URL` - LandingAI Extract API endpoint (default: https://api.va.landing.ai/v1/ade/extract)
+- `LANDINGAI_PARSE_MODEL` - Parse model version (default: dpt-2-latest)
+- `LANDINGAI_EXTRACT_MODEL` - Extract model version (default: extract-latest)
 - `SECRET_KEY` - Application secret key
+- `DEBUG` - Enable debug mode (default: False)
+- `LOG_LEVEL` - Logging level (default: INFO)
 - `MAX_UPLOAD_SIZE` - Maximum file upload size (bytes)
 - `UPLOAD_DIR` - Directory for storing uploaded files
+
+### Troubleshooting
+
+**Environment Variable Conflicts**: If you encounter a Pydantic validation error about `DEBUG` being an invalid boolean, you may have a conflicting system-level `DEBUG` environment variable. The `run_debug.py` script automatically handles this, but if using other methods to start the server:
+
+```bash
+# Check for conflicting environment variables
+env | grep DEBUG
+
+# If found, unset it before running
+unset DEBUG
+uvicorn app.main:app --reload
+```

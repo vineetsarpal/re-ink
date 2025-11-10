@@ -46,12 +46,6 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 python -m app.main
 ```
 
-**Testing**:
-```bash
-pytest
-pytest --cov=app tests/  # With coverage
-```
-
 ### Frontend (React)
 
 Navigate to `frontend/` directory for all frontend commands.
@@ -230,19 +224,6 @@ All API endpoints follow consistent patterns:
 3. Import and use API functions from `services/api.ts`
 4. Add routing in `App.tsx` if it's a page component
 5. Update navigation in `components/Layout.tsx` if needed
-
-## Testing Strategy
-
-### Backend Testing
-- Unit tests for service layer logic
-- Integration tests for API endpoints
-- Database fixture setup for consistent test data
-- Mock external API calls (LandingAI)
-
-### Frontend Testing
-- Component testing with React Testing Library (not yet implemented)
-- API integration testing with mock server
-- E2E testing for critical workflows (not yet implemented)
 
 ## Deployment Considerations
 

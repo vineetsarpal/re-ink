@@ -31,6 +31,66 @@ re-ink is a full-stack web application that streamlines reinsurance contract man
 - **React Query**: Server state management
 - **Axios**: HTTP client
 
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                          USER / BROWSER                         │
+└────────────────────────────────┬────────────────────────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │   React Frontend        │
+                    │   (TypeScript + Vite)   │
+                    │                         │
+                    │  - File Upload UI       │
+                    │  - Review Form          │
+                    │  - Contract Management  │
+                    │  - Party Management     │
+                    │  - Dashboard            │
+                    └────────────┬────────────┘
+                                 │ HTTP/REST
+                    ┌────────────▼────────────┐
+                    │   FastAPI Backend       │
+                    │   (Python)              │
+                    │                         │
+                    │  /api/documents  ◄──────┼─── Document Upload
+                    │  /api/contracts         │
+                    │  /api/parties           │
+                    │  /api/review            │
+                    └──┬────────────────────┬─┘
+                       │                    │
+        ┌──────────────▼──────────┐   ┌────▼──────────────┐
+        │   PostgreSQL Database   │   │   LandingAI API   │
+        │                         │   │                   │
+        │  - Contracts            │   │  - Parse Doc      │
+        │  - Parties              │   │  - Extract Data   │
+        │  - Relationships        │   │  - AI Processing  │
+        └─────────────────────────┘   └───────────────────┘
+
+                        DOCUMENT FLOW
+                        ──────────────
+
+    1. User uploads PDF/DOCX  ──────────────►  Frontend
+                                                    │
+    2. File sent to backend   ◄────────────────────┘
+       via /api/documents/upload                    │
+                                                    ▼
+    3. Backend forwards to    ──────────────►  LandingAI
+       LandingAI API                                │
+                                                    │
+    4. AI extracts contract   ◄────────────────────┘
+       details & party info                         │
+                                                    ▼
+    5. Results sent to        ──────────────►  Frontend
+       frontend for review                          │
+                                                    │
+    6. User reviews & approves ◄────────────────────┘
+       /api/review/approve                          │
+                                                    ▼
+    7. Data saved to database ──────────────►  PostgreSQL
+       (Contracts + Parties)
+```
+
 ## Quick Start
 
 ### Prerequisites

@@ -29,7 +29,31 @@ def approve_extracted_data(
     4. Returns the created entities
     """
     try:
+        logger.info("=== Starting approve_extracted_data ===")
+        logger.info(f"Received {len(review_data.parties)} parties")
+        logger.info(f"Contract data: {review_data.contract.model_dump()}")
+
+        # Check if contract already exists by contract_number
+        existing_contract = None
+        if review_data.contract.contract_number:
+            existing_contract = db.query(Contract).filter(
+                Contract.contract_number == review_data.contract.contract_number
+            ).first()
+
+        if existing_contract:
+            logger.warning(f"Contract with number {review_data.contract.contract_number} already exists (ID: {existing_contract.id})")
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "duplicate_contract",
+                    "message": f"A contract with number '{review_data.contract.contract_number}' already exists",
+                    "existing_contract_id": existing_contract.id,
+                    "contract_number": review_data.contract.contract_number
+                }
+            )
+
         party_ids = []
+        party_status = []  # Track which parties are new vs existing
 
         # Process parties
         for party_data in review_data.parties:
@@ -50,6 +74,11 @@ def approve_extracted_data(
                 # Use existing party
                 logger.info(f"Using existing party: {existing_party.name}")
                 party_ids.append(existing_party.id)
+                party_status.append({
+                    "id": existing_party.id,
+                    "name": existing_party.name,
+                    "status": "existing"
+                })
             elif review_data.create_new_parties:
                 # Create new party
                 new_party = Party(**party_data.model_dump())
@@ -57,6 +86,11 @@ def approve_extracted_data(
                 db.flush()  # Flush to get the ID without committing
                 party_ids.append(new_party.id)
                 logger.info(f"Created new party: {new_party.name}")
+                party_status.append({
+                    "id": new_party.id,
+                    "name": new_party.name,
+                    "status": "created"
+                })
             else:
                 raise HTTPException(
                     status_code=400,
@@ -67,8 +101,21 @@ def approve_extracted_data(
         contract_dict = review_data.contract.model_dump(exclude={"party_roles"})
         contract = Contract(**contract_dict)
 
-        # Set extraction metadata
-        contract.review_status = "approved"
+        # Set extraction metadata and status
+        contract.review_status = "approved"  # User approved the extraction
+
+        # Determine contract status based on dates
+        from datetime import date
+        today = date.today()
+
+        if contract.expiration_date < today:
+            contract.status = "expired"
+        elif contract.effective_date <= today <= contract.expiration_date:
+            contract.status = "active"
+        else:
+            # Effective date is in the future
+            contract.status = "pending_review"
+
         contract.is_manually_created = False
 
         db.add(contract)
@@ -86,10 +133,20 @@ def approve_extracted_data(
 
         logger.info(f"Contract approved and created: {contract.contract_number}")
 
+        # Build informative message
+        new_parties = [p for p in party_status if p["status"] == "created"]
+        existing_parties = [p for p in party_status if p["status"] == "existing"]
+
+        message_parts = [f"Contract created successfully (ID: {contract.id})"]
+        if new_parties:
+            message_parts.append(f"{len(new_parties)} new party/parties created")
+        if existing_parties:
+            message_parts.append(f"{len(existing_parties)} existing party/parties linked")
+
         return ReviewApprovalResponse(
             contract_id=contract.id,
             party_ids=party_ids,
-            message="Contract and parties created successfully"
+            message=". ".join(message_parts)
         )
 
     except HTTPException:

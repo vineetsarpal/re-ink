@@ -24,28 +24,131 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
-  const { register, handleSubmit, formState: { errors } } = useForm({
+  const { register, handleSubmit, formState: { errors }, getValues } = useForm({
     defaultValues: {
       contract: extractionResult.contract_data,
       parties: extractionResult.parties_data,
     },
   });
 
+  // Debug: Log the extraction result on mount
+  React.useEffect(() => {
+    console.log('ReviewForm mounted with extraction result:', extractionResult);
+    console.log('Contract data:', extractionResult.contract_data);
+    console.log('Parties data:', extractionResult.parties_data);
+    console.log('Parties data type:', typeof extractionResult.parties_data);
+    console.log('Parties data is array:', Array.isArray(extractionResult.parties_data));
+    console.log('Parties data length:', extractionResult.parties_data?.length);
+  }, []);
+
   const onSubmit = async (data: any) => {
     setIsSubmitting(true);
 
     try {
+      console.log('Form data submitted:', data);
+
+      // Handle empty or undefined parties array
+      const parties = data.parties || [];
+
+      // Warn user if no parties were extracted
+      if (parties.length === 0) {
+        const proceed = confirm(
+          'Warning: No parties were extracted from the document.\n\n' +
+          'The contract will be created without any associated parties.\n' +
+          'You can add parties later from the Parties page.\n\n' +
+          'Do you want to continue?'
+        );
+        if (!proceed) {
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
+      // Clean data: convert empty strings to null for optional fields
+      const cleanObject = (obj: any): any => {
+        const cleaned: any = {};
+        for (const key in obj) {
+          const value = obj[key];
+          // Convert empty strings to null, keep other falsy values as-is
+          if (value === '') {
+            cleaned[key] = null;
+          } else if (value !== undefined) {
+            cleaned[key] = value;
+          }
+        }
+        return cleaned;
+      };
+
+      const cleanedContract = cleanObject(data.contract);
+      const cleanedParties = parties.map((party: any) => cleanObject(party));
+
       const reviewData: ReviewData = {
-        contract: data.contract,
-        parties: data.parties,
+        contract: cleanedContract,
+        parties: cleanedParties,
         create_new_parties: true,
       };
 
+      console.log('Sending review data to API:', reviewData);
+      console.log('Contract fields:', Object.keys(data.contract));
+      console.log('Number of parties:', parties.length);
       const response = await reviewApi.approve(reviewData);
+      console.log('API response:', response);
+
+      // Show success message with details
+      alert(
+        `✅ Success!\n\n${response.message}\n\n` +
+        `Contract ID: ${response.contract_id}\n` +
+        `Parties: ${response.party_ids.length > 0 ? response.party_ids.join(', ') : 'None'}`
+      );
+
       onApprove?.(response.contract_id, response.party_ids);
     } catch (err: any) {
       console.error('Error approving data:', err);
-      alert(err.response?.data?.detail || 'Failed to approve data');
+      console.error('Error response data:', err.response?.data);
+      console.error('Error details:', {
+        message: err.message,
+        response: err.response?.data,
+        status: err.response?.status
+      });
+
+      // Handle duplicate contract error (409)
+      if (err.response?.status === 409) {
+        const detail = err.response.data.detail;
+        if (detail?.error === 'duplicate_contract') {
+          const message =
+            `⚠️ Duplicate Contract Detected\n\n` +
+            `Contract Number: ${detail.contract_number}\n\n` +
+            `This contract already exists in the system (ID: ${detail.existing_contract_id}).\n\n` +
+            `You can view it on the Contracts page.`;
+
+          alert(message);
+
+          // Optionally navigate to contracts page
+          if (confirm('Would you like to view the Contracts page?')) {
+            onCancel?.();
+            // Note: Navigation will happen via the cancel callback
+          }
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
+      // Better error message display for other errors
+      let errorMessage = 'Failed to approve data';
+      if (err.response?.data?.detail) {
+        if (Array.isArray(err.response.data.detail)) {
+          // Pydantic validation errors
+          errorMessage = 'Validation errors:\n' + err.response.data.detail.map((e: any) =>
+            `- ${e.loc?.join('.')} : ${e.msg}`
+          ).join('\n');
+        } else if (typeof err.response.data.detail === 'string') {
+          errorMessage = err.response.data.detail;
+        } else if (err.response.data.detail.message) {
+          errorMessage = err.response.data.detail.message;
+        }
+      }
+
+      alert(errorMessage);
     } finally {
       setIsSubmitting(false);
     }
@@ -72,7 +175,36 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
         </div>
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)}>
+      <form onSubmit={(e) => {
+        console.log('Form submit event triggered');
+        console.log('Form errors:', errors);
+        handleSubmit(
+          onSubmit,
+          (validationErrors) => {
+            console.error('Form validation failed:', validationErrors);
+
+            // Extract error messages in a safe way
+            const errorMessages: string[] = [];
+
+            if (validationErrors.contract) {
+              Object.keys(validationErrors.contract).forEach(field => {
+                errorMessages.push(`Contract ${field}: ${validationErrors.contract[field]?.message || 'Required'}`);
+              });
+            }
+
+            if (validationErrors.parties) {
+              Object.keys(validationErrors.parties).forEach(index => {
+                const partyErrors = validationErrors.parties[index];
+                Object.keys(partyErrors).forEach(field => {
+                  errorMessages.push(`Party ${parseInt(index) + 1} ${field}: ${partyErrors[field]?.message || 'Required'}`);
+                });
+              });
+            }
+
+            alert('Please fix form validation errors:\n\n' + errorMessages.join('\n'));
+          }
+        )(e);
+      }}>
         {/* Contract Information Section */}
         <section className="form-section">
           <h3>Contract Information</h3>
@@ -111,6 +243,35 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
                 <option value="">Select type</option>
                 <option value="treaty">Treaty</option>
                 <option value="facultative">Facultative</option>
+                <option value="proportional">Proportional</option>
+                <option value="non-proportional">Non-Proportional</option>
+              </select>
+            </div>
+
+            <div className="form-field">
+              <label htmlFor="contract_sub_type">Contract Sub-Type</label>
+              <select
+                id="contract_sub_type"
+                {...register('contract.contract_sub_type')}
+                disabled={!isEditing}
+              >
+                <option value="">Select sub-type</option>
+                <option value="quota_share">Quota Share</option>
+                <option value="surplus">Surplus</option>
+                <option value="xol">XOL (Excess of Loss)</option>
+                <option value="facultative_obligatory">Facultative Obligatory</option>
+                <option value="facultative_optional">Facultative Optional</option>
+              </select>
+            </div>
+
+            <div className="form-field">
+              <label htmlFor="contract_nature">Contract Nature</label>
+              <select
+                id="contract_nature"
+                {...register('contract.contract_nature')}
+                disabled={!isEditing}
+              >
+                <option value="">Select nature</option>
                 <option value="proportional">Proportional</option>
                 <option value="non-proportional">Non-Proportional</option>
               </select>
@@ -158,6 +319,39 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
             </div>
 
             <div className="form-field">
+              <label htmlFor="limit_amount">Limit Amount</label>
+              <input
+                type="number"
+                step="0.01"
+                id="limit_amount"
+                {...register('contract.limit_amount')}
+                disabled={!isEditing}
+              />
+            </div>
+
+            <div className="form-field">
+              <label htmlFor="retention_amount">Retention/Deductible Amount</label>
+              <input
+                type="number"
+                step="0.01"
+                id="retention_amount"
+                {...register('contract.retention_amount')}
+                disabled={!isEditing}
+              />
+            </div>
+
+            <div className="form-field">
+              <label htmlFor="commission_rate">Commission Rate (%)</label>
+              <input
+                type="number"
+                step="0.01"
+                id="commission_rate"
+                {...register('contract.commission_rate')}
+                disabled={!isEditing}
+              />
+            </div>
+
+            <div className="form-field">
               <label htmlFor="line_of_business">Line of Business</label>
               <input
                 id="line_of_business"
@@ -189,12 +383,28 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
 
         {/* Parties Section */}
         <section className="form-section">
-          <h3>Parties ({extractionResult.parties_data.length})</h3>
+          <h3>Parties ({extractionResult.parties_data?.length || 0})</h3>
 
-          {extractionResult.parties_data.map((party, index) => (
+          {(!extractionResult.parties_data || extractionResult.parties_data.length === 0) && (
+            <div className="no-parties-message" style={{
+              padding: '20px',
+              backgroundColor: '#fff3cd',
+              border: '1px solid #ffc107',
+              borderRadius: '4px',
+              marginBottom: '20px'
+            }}>
+              <p style={{ margin: 0, color: '#856404' }}>
+                ⚠️ No parties were extracted from the document.
+                The contract will be created without associated parties.
+                You can add parties later.
+              </p>
+            </div>
+          )}
+
+          {extractionResult.parties_data?.map((party, index) => (
             <div key={index} className="party-card">
               <h4>
-                {party.name || `Party ${index + 1}`} ({party.party_type})
+                {party.name || `Party ${index + 1}`} {party.party_type && `(${party.party_type})`}
               </h4>
 
               <div className="form-grid">
@@ -212,7 +422,7 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
                     {...register(`parties.${index}.party_type`, { required: true })}
                     disabled={!isEditing}
                   >
-                    <option value="cedent">Cedent</option>
+                    <option value="cedant">Cedant</option>
                     <option value="reinsurer">Reinsurer</option>
                     <option value="broker">Broker</option>
                     <option value="other">Other</option>
@@ -287,6 +497,10 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
             type="submit"
             className="btn btn-primary"
             disabled={isSubmitting}
+            onClick={() => {
+              console.log('Approve button clicked', { isSubmitting });
+              console.log('Current form values:', getValues());
+            }}
           >
             <Save size={16} />
             {isSubmitting ? 'Saving...' : 'Approve & Create'}

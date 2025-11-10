@@ -18,6 +18,8 @@ class ContractBase(BaseModel):
     contract_number: str
     contract_name: str
     contract_type: Optional[str] = None
+    contract_sub_type: Optional[str] = None
+    contract_nature: Optional[str] = None
     effective_date: date
     expiration_date: date
     inception_date: Optional[date] = None
@@ -46,6 +48,8 @@ class ContractUpdate(BaseModel):
     contract_number: Optional[str] = None
     contract_name: Optional[str] = None
     contract_type: Optional[str] = None
+    contract_sub_type: Optional[str] = None
+    contract_nature: Optional[str] = None
     effective_date: Optional[date] = None
     expiration_date: Optional[date] = None
     inception_date: Optional[date] = None

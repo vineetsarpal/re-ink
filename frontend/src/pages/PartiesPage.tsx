@@ -36,6 +36,7 @@ export const PartiesPage: React.FC = () => {
     const matchesSearch = party.name
       .toLowerCase()
       .includes(searchTerm.toLowerCase());
+    // Show all parties including inactive ones (is_active field determines badge)
     return matchesSearch;
   });
 
@@ -64,7 +65,7 @@ export const PartiesPage: React.FC = () => {
             onChange={(e) => setTypeFilter(e.target.value)}
           >
             <option value="">All Types</option>
-            <option value="cedent">Cedent</option>
+            <option value="cedant">Cedant</option>
             <option value="reinsurer">Reinsurer</option>
             <option value="broker">Broker</option>
             <option value="other">Other</option>
