@@ -49,12 +49,12 @@ class ReinsuranceContractFieldExtractionSchema(BaseModel):
     # Financial Terms
     premium_amount: str = Field(
         ...,
-        description='The premium amount paid by the cedant to the reinsurer for the coverage under this contract.',
+        description='The premium amount or share to be paid by the cedant to the reinsurer for the coverage under this contract.',
         title='Premium Amount',
     )
     commission_rate: str = Field(
         ...,
-        description='The commission rate or percentage paid by the reinsurer to the cedant, typically expressed as a percentage.',
+        description='The commission rate or percentage paid by the reinsurer to the cedant or broker, typically expressed as a percentage.',
         title='Commission Rate',
     )
     deductible_amount: str = Field(
@@ -64,7 +64,7 @@ class ReinsuranceContractFieldExtractionSchema(BaseModel):
     )
     limit_covered: str = Field(
         ...,
-        description='The maximum amount or percentage of coverage provided by the reinsurer under the contract.',
+        description='The amount or percentage of coverage provided by the reinsurer under the contract.',
         title='Limit Covered',
     )
     upper_limit: str = Field(
@@ -126,7 +126,6 @@ class ReinsuranceContractFieldExtractionSchema(BaseModel):
         description='Any special provisions or clauses',
         title='Special Provisions',
     )
-
 
 def get_extraction_schema() -> dict:
     """
