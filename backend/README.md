@@ -9,6 +9,7 @@ FastAPI backend for the re-ink reinsurance contract management system.
 - **Contract Management**: Full CRUD operations for reinsurance contracts
 - **Party Management**: Manage parties (cedents, reinsurers, brokers)
 - **Review Workflow**: Review and approve AI-extracted data before creation
+- **Agent Workflows**: LangChain/LangGraph agents for guided intake and automated reviews
 
 ## Setup
 
@@ -106,6 +107,11 @@ backend/
 - `POST /api/review/approve` - Approve and create extracted data
 - `POST /api/review/reject/{job_id}` - Reject extraction
 
+### Agents
+- `POST /api/agents/intake` - Guided intake helper over extraction jobs
+- `POST /api/agents/review` - Automated compliance and risk summary for a contract
+- `POST /api/documents/mock-job` - Seed a mock extraction job for offline testing
+
 ## Database Migrations
 
 Create a new migration:
@@ -133,11 +139,56 @@ Key environment variables:
 - `LANDINGAI_EXTRACT_URL` - LandingAI Extract API endpoint (default: https://api.va.landing.ai/v1/ade/extract)
 - `LANDINGAI_PARSE_MODEL` - Parse model version (default: dpt-2-latest)
 - `LANDINGAI_EXTRACT_MODEL` - Extract model version (default: extract-latest)
+- `OPENAI_API_KEY` - API key for the default chat model powering agents
+- `AGENT_MODEL` - Chat model identifier (default: gpt-4o-mini)
+- `AGENT_TEMPERATURE` - Creativity/variance setting for agent responses (default: 0.1)
+- `AGENT_OFFLINE_MODE` - Set to `true` to bypass external LLM calls during local tests
 - `SECRET_KEY` - Application secret key
 - `DEBUG` - Enable debug mode (default: False)
 - `LOG_LEVEL` - Logging level (default: INFO)
 - `MAX_UPLOAD_SIZE` - Maximum file upload size (bytes)
 - `UPLOAD_DIR` - Directory for storing uploaded files
+
+## Offline Testing (No LandingAI Credits)
+
+You can exercise the complete intake-to-review workflow without using LandingAI or OpenAI:
+
+1. Enable offline mode and point the backend at a local SQLite database:
+    ```bash
+    export AGENT_OFFLINE_MODE=true
+    export DATABASE_URL=sqlite:///./dev_agents.db
+    export SECRET_KEY=test-secret
+    export LANDINGAI_API_KEY=dummy
+    ```
+2. Seed a mock extraction job:
+    ```bash
+    curl -X POST http://localhost:8000/api/documents/mock-job
+    ```
+   The response includes `job_id`.
+3. Request guided intake help (replace `<JOB_ID>`):
+    ```bash
+    curl -X POST http://localhost:8000/api/agents/intake \
+      -H "Content-Type: application/json" \
+      -d '{"job_id":"<JOB_ID>","user_input":"Review this extraction"}'
+    ```
+   Use the returned `suggested_review_payload` with `POST /api/review/approve`.
+4. Run the automated contract review with the new `contract_id`:
+    ```bash
+    curl -X POST http://localhost:8000/api/agents/review \
+      -H "Content-Type: application/json" \
+      -d '{"contract_id":123,"user_input":"Summarise compliance posture"}'
+    ```
+The agents return deterministic, heuristic guidance in offline mode so you can validate the entire flow without external credits.
+
+### Sample Extraction With Live LLM
+
+If you still want LangChain/LangGraph to use your `OPENAI_API_KEY` but prefer not to call LandingAI, leave `AGENT_OFFLINE_MODE` unset/`false`, start the backend, and either:
+
+- Call `POST /api/documents/mock-job` manually (returns a ready-to-review extraction), or
+- Click **Use Sample Extraction** on the frontend upload page.
+
+Both options seed the extraction store with representative contract data so the guided intake and automated review agents run against OpenAI responses while skipping LandingAI entirely.
+After approving the contract, navigate to its detail page and press **Generate AI Review** to request the automated summary when needed.
 
 ### Troubleshooting
 

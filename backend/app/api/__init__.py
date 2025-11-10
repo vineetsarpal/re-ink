@@ -1,6 +1,6 @@
 """API router configuration."""
 from fastapi import APIRouter
-from app.api.endpoints import contracts, parties, documents, review
+from app.api.endpoints import agents, contracts, parties, documents, review
 
 api_router = APIRouter()
 
@@ -24,4 +24,9 @@ api_router.include_router(
     review.router,
     prefix="/review",
     tags=["review"]
+)
+api_router.include_router(
+    agents.router,
+    prefix="/agents",
+    tags=["agents"]
 )

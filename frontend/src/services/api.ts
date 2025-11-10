@@ -11,6 +11,9 @@ import type {
   ExtractionResult,
   ReviewData,
   ReviewApprovalResponse,
+  GuidedIntakeResponse,
+  AutomatedReviewResponse,
+  AgentChatMessage,
 } from '@/types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
@@ -64,6 +67,44 @@ export const documentApi = {
    */
   delete: async (jobId: string): Promise<void> => {
     await api.delete(`/documents/${jobId}`);
+  },
+
+  /**
+   * Seed a mock extraction job for local testing (skips LandingAI).
+   */
+  seedMockJob: async (jobId?: string): Promise<DocumentExtractionStatus> => {
+    const payload = jobId ? { job_id: jobId } : undefined;
+    const response = await api.post<DocumentExtractionStatus>('/documents/mock-job', payload);
+    return response.data;
+  },
+};
+
+// Agent APIs
+export const agentApi = {
+  runIntake: async (
+    jobId: string,
+    userInput = 'Review the extracted contract data and highlight gaps or risks.',
+    chatHistory: AgentChatMessage[] = [],
+  ): Promise<GuidedIntakeResponse> => {
+    const response = await api.post<GuidedIntakeResponse>('/agents/intake', {
+      job_id: jobId,
+      user_input: userInput,
+      chat_history: chatHistory,
+    });
+    return response.data;
+  },
+
+  runContractReview: async (
+    contractId: number,
+    userInput = 'Summarise compliance posture, highlight risks, and recommend next steps.',
+    chatHistory: AgentChatMessage[] = [],
+  ): Promise<AutomatedReviewResponse> => {
+    const response = await api.post<AutomatedReviewResponse>('/agents/review', {
+      contract_id: contractId,
+      user_input: userInput,
+      chat_history: chatHistory,
+    });
+    return response.data;
   },
 };
 

@@ -9,6 +9,8 @@ React frontend for the re-ink reinsurance contract management system.
 - **Review Interface**: Review and edit extracted contract data
 - **Contract Dashboard**: View and manage all contracts
 - **Party Management**: Browse and search parties
+- **Sample Extraction Mode**: Seed mock data to exercise the workflow without LandingAI
+- **AI Guidance**: Surface LangChain/LangGraph intake insights and automated contract reviews
 - **Modern UI**: Clean, professional enterprise design
 
 ## Setup
@@ -38,6 +40,13 @@ npm run dev
 ```
 
 The application will be available at http://localhost:3000
+
+### Using Sample Extraction Mode
+
+- Ensure the backend is running with `AGENT_OFFLINE_MODE=false` and a valid `OPENAI_API_KEY` if you want live LLM guidance.
+- On the Upload page click **Use Sample Extraction**. The frontend calls `POST /api/documents/mock-job` and jumps straight to the review step with mock contract data.
+- Proceed through the guided review and approval flows exactly as if LandingAI had processed a real document.
+- After approval, open the contract detail page and click **Generate AI Review** to request a fresh compliance summary on demand.
 
 ### Building for Production
 
