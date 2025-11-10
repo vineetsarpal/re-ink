@@ -16,6 +16,13 @@ re-ink is a full-stack web application that streamlines reinsurance contract man
 - 🧪 **Sample Extraction Mode**: Seed mock data to test the workflow without LandingAI
 - 🤝 **AI Agent Guidance**: LangChain/LangGraph agents surface intake insights and automated reviews
 
+## Sample Documents
+
+- Browse curated sample files in `sample_documents/` to exercise the ingestion workflow end to end.
+- Documents are sourced from public SEC EDGAR filings (https://www.sec.gov/edgar/search/) and trimmed to the excerpts needed for development and QA.
+- To upload a sample through the app, remove the `.example` suffix (or convert back to a standard PDF/DOCX) so the file matches the expected format.
+- When committing binary samples, rename them with `.pdf.example` or `.docx.example` suffixes so they bypass the `.gitignore` filters while preserving their original format.
+
 ## Technology Stack
 
 ### Backend
