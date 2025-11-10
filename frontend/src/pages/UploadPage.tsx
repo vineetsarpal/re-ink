@@ -187,8 +187,8 @@ export const UploadPage: React.FC = () => {
             />
             <div className="mock-upload">
               <p className="mock-upload__description">
-                No LandingAI credits? Seed a fully-populated mock extraction to exercise
-                the review and agent flows while still using your OpenAI API key.
+                Seed a fully-populated mock extraction to exercise
+                the AI agent flows while still using your OpenAI API key.
               </p>
               <button
                 type="button"
