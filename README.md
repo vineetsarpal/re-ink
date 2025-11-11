@@ -16,6 +16,10 @@ re-ink is a full-stack web application that streamlines reinsurance contract man
 - 🧪 **Sample Extraction Mode**: Seed mock data to test the workflow without LandingAI
 - 🤝 **AI Agent Guidance**: LangChain/LangGraph agents surface intake insights and automated reviews
 
+## UI Preview
+
+![re-ink home page](docs/assets/screenshots/home-page.png)
+
 ## Sample Documents
 
 - Browse curated sample files in `sample_documents/` to exercise the ingestion workflow end to end.
@@ -180,26 +184,37 @@ re-ink/
 ## API Endpoints
 
 ### Documents
-- `POST /api/documents/upload` - Upload document
-- `GET /api/documents/status/{job_id}` - Get extraction status
-- `GET /api/documents/results/{job_id}` - Get extraction results
+- `POST /api/documents/upload` - Upload a document and start extraction in the background
+- `GET /api/documents/status/{job_id}` - Check extraction status (supports `processing`, `completed`, `failed`)
+- `GET /api/documents/results/{job_id}` - Retrieve parsed extraction results when a job is complete
 
 ### Contracts
-- `GET /api/contracts/` - List contracts
-- `POST /api/contracts/` - Create contract
-- `GET /api/contracts/{id}` - Get contract details
-- `PUT /api/contracts/{id}` - Update contract
-- `DELETE /api/contracts/{id}` - Delete contract
+- `GET /api/contracts/` - List contracts (supports `status`, `contract_type`, `skip`, `limit` filters)
+- `POST /api/contracts/` - Create a contract
+- `GET /api/contracts/{id}` - Get contract details with associated parties
+- `PUT /api/contracts/{id}` - Update contract fields
+- `DELETE /api/contracts/{id}` - Soft delete a contract
+- `POST /api/contracts/{id}/parties/{party_id}` - Link a party to a contract with a role
+- `DELETE /api/contracts/{id}/parties/{party_id}` - Remove a party association from a contract
 
 ### Parties
-- `GET /api/parties/` - List parties
-- `POST /api/parties/` - Create party
+- `GET /api/parties/` - List parties (supports `party_type`, `is_active`, `skip`, `limit`)
+- `POST /api/parties/` - Create a party
 - `GET /api/parties/{id}` - Get party details
-- `PUT /api/parties/{id}` - Update party
+- `PUT /api/parties/{id}` - Update party fields
+- `DELETE /api/parties/{id}` - Soft delete a party
+- `GET /api/parties/search/by-name` - Search parties by partial name match
 
 ### Review
 - `POST /api/review/approve` - Approve extracted data
 - `POST /api/review/reject/{job_id}` - Reject extraction
+
+### Agents
+- `POST /api/agents/intake` - Run the guided intake LangChain agent for an extraction job
+- `POST /api/agents/review` - Generate an automated review for a contract
+
+### System
+- `GET /api/system/config` - Return agent configuration flags (e.g., offline mode) for the frontend
 
 ## Development
 
@@ -212,14 +227,31 @@ re-ink/
 
 ### Backend (.env)
 ```env
-DATABASE_URL=postgresql://user:password@localhost:5432/reink_db
-LANDINGAI_API_KEY=your_api_key
-LANDINGAI_API_URL=https://api.landing.ai/v1/agent/document-extraction
+APP_NAME=re-ink
+APP_VERSION=1.0.0
+DEBUG=false
 SECRET_KEY=your_secret_key
+DATABASE_URL=postgresql://user:password@localhost:5432/reink_db
+LANDINGAI_API_KEY=your_landingai_api_key
+LANDINGAI_PARSE_URL=https://api.va.landing.ai/v1/ade/parse
+LANDINGAI_EXTRACT_URL=https://api.va.landing.ai/v1/ade/extract
+LANDINGAI_PARSE_MODEL=dpt-2-latest
+LANDINGAI_EXTRACT_MODEL=extract-latest
 MAX_UPLOAD_SIZE=52428800
 UPLOAD_DIR=./uploads
-ALLOWED_ORIGINS=http://localhost:3000
+ALLOWED_EXTENSIONS=.pdf,.docx
+ALLOWED_ORIGINS=["http://localhost:3000","http://localhost:5173"]
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+LOG_LEVEL=INFO
+OPENAI_API_KEY=your_openai_key
+AGENT_MODEL=gpt-4o-mini
+AGENT_TEMPERATURE=0.1
+AGENT_OFFLINE_MODE=false
 ```
+
+- `OPENAI_API_KEY` is only needed when LangChain/LangGraph agents should call OpenAI; set `AGENT_OFFLINE_MODE=true` to bypass those calls locally.
+- `ALLOWED_ORIGINS` supports JSON array notation (shown above) or a comma-separated list.
+- Adjust `MAX_UPLOAD_SIZE`, `ALLOWED_EXTENSIONS`, and `UPLOAD_DIR` if you need to support additional file formats.
 
 ### Frontend (.env)
 ```env
