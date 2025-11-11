@@ -18,7 +18,7 @@ re-ink is a full-stack web application that streamlines reinsurance contract man
 
 ## UI Preview
 
-![re-ink home page](docs/assets/screenshots/home-page.png)
+![re-ink home page](assets/screenshots/home-pg.png)
 
 ## Sample Documents
 
