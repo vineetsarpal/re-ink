@@ -237,6 +237,29 @@ export const ContractDetailPage: React.FC = () => {
     }).format(amount);
   };
 
+  const formatLimit = (value: ContractWithParties['limit_amount'], currency = 'USD') => {
+    if (value === null || value === undefined) {
+      return 'N/A';
+    }
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return 'N/A';
+      }
+      if (trimmed.endsWith('%')) {
+        return trimmed;
+      }
+      const numeric = Number(trimmed);
+      if (!Number.isNaN(numeric)) {
+        return formatCurrency(numeric, currency);
+      }
+      return trimmed;
+    }
+
+    return formatCurrency(value, currency);
+  };
+
   return (
       <div className="contract-detail-page">
       {/* Header */}
@@ -497,9 +520,11 @@ export const ContractDetailPage: React.FC = () => {
               <span className="value">{renderField('currency')}</span>
             </div>
             <div className="info-item">
-              <label>Limit Amount</label>
+              <label>Limit</label>
               <span className="value">
-                {isEditing ? renderField('limit_amount', 'number') : formatCurrency(contract.limit_amount, contract.currency)}
+                {isEditing
+                  ? renderField('limit_amount')
+                  : formatLimit(contract.limit_amount, contract.currency)}
               </span>
             </div>
             <div className="info-item">

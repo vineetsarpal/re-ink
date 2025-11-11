@@ -7,7 +7,7 @@ import { ArrowLeft } from 'lucide-react';
 import { FileUpload } from '@/components/FileUpload';
 import { ExtractionStatus } from '@/components/ExtractionStatus';
 import { ReviewForm } from '@/components/ReviewForm';
-import { agentApi, documentApi } from '@/services/api';
+import { agentApi, documentApi, systemApi } from '@/services/api';
 import type {
   DocumentUploadResponse,
   DocumentExtractionStatus,
@@ -29,6 +29,7 @@ export const UploadPage: React.FC = () => {
   const [isIntakeLoading, setIsIntakeLoading] = useState(false);
   const [intakeError, setIntakeError] = useState<string | null>(null);
   const lastAgentJobId = useRef<string | null>(null);
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
 
   const handleUploadSuccess = (response: DocumentUploadResponse) => {
     setUploadResponse(response);
@@ -122,6 +123,15 @@ export const UploadPage: React.FC = () => {
   };
 
   useEffect(() => {
+    systemApi
+      .getConfig()
+      .then((config) => setIsOfflineMode(config.agent_offline_mode))
+      .catch((error) => {
+        console.error('Failed to load system configuration', error);
+      });
+  }, []);
+
+  useEffect(() => {
     if (
       currentStep === 'review' &&
       uploadResponse?.job_id &&
@@ -185,20 +195,22 @@ export const UploadPage: React.FC = () => {
               onUploadSuccess={handleUploadSuccess}
               onUploadError={(error) => alert(error)}
             />
-            <div className="mock-upload">
-              <p className="mock-upload__description">
-                Seed a fully-populated mock extraction to exercise
-                the AI agent flows while still using your OpenAI API key.
-              </p>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={handleSeedMock}
-                disabled={isSeedingMock}
-              >
-                {isSeedingMock ? 'Seeding Mock Extraction...' : 'Use Sample Extraction'}
-              </button>
-            </div>
+            {isOfflineMode && (
+              <div className="mock-upload">
+                <p className="mock-upload__description">
+                  Seed a fully-populated mock extraction to exercise
+                  the AI agent flows while still using your OpenAI API key.
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleSeedMock}
+                  disabled={isSeedingMock}
+                >
+                  {isSeedingMock ? 'Seeding Mock Extraction...' : 'Use Sample Extraction'}
+                </button>
+              </div>
+            )}
           </>
         )}
 

@@ -490,7 +490,7 @@ tbody tr:last-child td {
   border: 1px solid rgba(59, 130, 246, 0.1);
   border-radius: 1rem;
   padding: 1.75rem;
-  margin-bottom: 2rem;
+  margin: 2rem 0;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
 }
 
@@ -598,6 +598,25 @@ tbody tr:last-child td {
   color: #b91c1c;
   font-weight: 600;
   margin: 0;
+}
+
+.review-form .form-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.75rem;
+}
+
+.review-form .header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.header-actions__toggle {
+  min-width: 9rem;
 }
 
 .mock-upload {

@@ -203,10 +203,9 @@ re-ink/
 
 ## Development
 
-See detailed development guides:
+ See detailed development guides:
 - [Backend README](backend/README.md)
 - [Frontend README](frontend/README.md)
-- [Project Structure](PROJECT_STRUCTURE.md)
 - [CLAUDE.md](CLAUDE.md) - Development guidance for Claude Code
 
 ## Configuration

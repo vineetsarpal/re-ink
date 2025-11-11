@@ -32,6 +32,16 @@ class AgentConfigurationError(RuntimeError):
     """Raised when agent execution cannot proceed due to configuration issues."""
 
 
+GUIDED_REQUIRED_FIELDS = [
+    "contract_number",
+    "contract_name",
+    "effective_date",
+    "expiration_date",
+    "premium_amount",
+    "limit_amount",
+]
+
+
 def _resolve_llm():
     """Instantiate the default chat model used by agents."""
     try:
@@ -124,16 +134,25 @@ class AgentService:
         parties_data: List[dict] = []
         suggested_payload: Optional[ReviewData] = None
         payload_errors: List[str] = []
+        parsed_results: dict = {}
 
         if job_payload:
-            parsed = job_payload.get("parsed_results") or {}
-            contract_data = dict(parsed.get("contract_data") or {})
-            parties_data = list(parsed.get("parties_data") or [])
-            suggested_payload, payload_errors = self._build_review_payload(parsed)
+            parsed_results = job_payload.get("parsed_results") or {}
+            contract_data = dict(parsed_results.get("contract_data") or {})
+            parties_data = list(parsed_results.get("parties_data") or [])
+            suggested_payload, payload_errors = self._build_review_payload(parsed_results)
 
         errors = list(state.get("errors", []))
         if payload_errors:
             errors.extend(payload_errors)
+
+        if analysis:
+            computed_confidence = self._compute_guided_confidence(
+                analysis=analysis,
+                parsed_results=parsed_results,
+                errors=errors,
+            )
+            analysis = analysis.model_copy(update={"confidence": computed_confidence})
 
         return GuidedIntakeResponse(
             job_id=request.job_id,
@@ -175,6 +194,52 @@ class AgentService:
             create_new_parties=True,
         )
         return review_payload, errors
+
+    def _compute_guided_confidence(
+        self,
+        *,
+        analysis: GuidedIntakeAnalysis,
+        parsed_results: dict,
+        errors: List[str],
+    ) -> float:
+        """
+        Build a confidence score for guided intake analysis when the LLM does
+        not provide one. Combines extraction confidence, data completeness,
+        and downstream validation signals into a single bounded value.
+        """
+        contract_data = parsed_results.get("contract_data") or {}
+        parties_data = parsed_results.get("parties_data") or []
+        extraction_conf = parsed_results.get("confidence_score")
+
+        confidence_inputs: List[float] = []
+        if isinstance(extraction_conf, (int, float)):
+            confidence_inputs.append(float(extraction_conf))
+        if analysis.confidence is not None:
+            confidence_inputs.append(float(analysis.confidence))
+
+        baseline_conf = (
+            sum(confidence_inputs) / len(confidence_inputs) if confidence_inputs else 0.75
+        )
+
+        missing_in_payload = {
+            field for field in GUIDED_REQUIRED_FIELDS if not contract_data.get(field)
+        }
+        missing_reported = set(analysis.missing_fields or [])
+        total_missing = missing_in_payload | missing_reported
+        completeness_score = max(0.0, 1.0 - 0.12 * len(total_missing))
+
+        parties_score = 1.0 if parties_data else 0.85
+
+        penalty = min(0.25, 0.07 * len(errors))
+
+        combined = (
+            (0.55 * baseline_conf)
+            + (0.30 * completeness_score)
+            + (0.15 * parties_score)
+            - penalty
+        )
+
+        return round(max(0.05, min(1.0, combined)), 2)
 
     # ------------------------------------------------------------------ #
     # Automated contract review
@@ -330,16 +395,8 @@ class AgentService:
         parties_data: List[dict],
         user_input: str,
     ) -> GuidedIntakeAnalysis:
-        required_fields = [
-            "contract_number",
-            "contract_name",
-            "effective_date",
-            "expiration_date",
-            "premium_amount",
-            "limit_amount",
-        ]
         missing_fields = [
-            field for field in required_fields if not contract_data.get(field)
+            field for field in GUIDED_REQUIRED_FIELDS if not contract_data.get(field)
         ]
         contract_name = contract_data.get("contract_name") or "the contract"
         party_count = len(parties_data)

@@ -3,7 +3,7 @@
  */
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Users, Sparkles, Upload, CheckCircle, ArrowRight } from 'lucide-react';
+import { FileText, Sparkles, Upload, CheckCircle, ArrowRight, Bot } from 'lucide-react';
 
 export const HomePage: React.FC = () => {
   const navigate = useNavigate();
@@ -18,9 +18,9 @@ export const HomePage: React.FC = () => {
             <span>AI-Powered Contract Management</span>
           </div>
           <h1 className="hero-title">
-            <span className="gradient-text">Intelligent Reinsurance</span>
+            <span className="gradient-text">Re-Ink</span>
             <br />
-            Contract Management
+            Intelligent Reinsurance
           </h1>
           <p className="hero-description">
             Re-ink transforms complex reinsurance document processing with AI-powered extraction.
@@ -103,23 +103,23 @@ export const HomePage: React.FC = () => {
 
           <div className="feature-card">
             <div className="feature-icon">
-              <Users size={28} />
-            </div>
-            <h3>Party Management</h3>
-            <p>
-              Maintain a comprehensive database of cedants, reinsurers, and brokers.
-              Automatically link parties to contracts.
-            </p>
-          </div>
-
-          <div className="feature-card">
-            <div className="feature-icon">
               <CheckCircle size={28} />
             </div>
             <h3>Review & Approve</h3>
             <p>
               Review extracted data before it's saved. Edit any field to ensure
               accuracy and completeness.
+            </p>
+          </div>
+
+          <div className="feature-card">
+            <div className="feature-icon">
+              <Bot size={28} />
+            </div>
+            <h3>Autonomous AI Agents</h3>
+            <p>
+              Embedded agents coordinate ingestion, extraction, and QA so your team
+              can focus on decision-making instead of manual data wrangling.
             </p>
           </div>
 

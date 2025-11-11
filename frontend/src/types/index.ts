@@ -34,7 +34,7 @@ export interface Contract {
   inception_date?: string;
   premium_amount?: number;
   currency: string;
-  limit_amount?: number;
+  limit_amount?: number | string;
   retention_amount?: number;
   commission_rate?: number;
   line_of_business?: string;
@@ -142,3 +142,7 @@ export interface AutomatedReviewResponse {
 export type ContractStatus = 'draft' | 'pending_review' | 'active' | 'expired' | 'cancelled';
 export type ReviewStatus = 'pending' | 'approved' | 'rejected';
 export type PartyType = 'cedant' | 'reinsurer' | 'broker' | 'other';
+
+export interface SystemConfig {
+  agent_offline_mode: boolean;
+}

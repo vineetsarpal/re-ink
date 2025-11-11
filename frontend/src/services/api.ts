@@ -14,6 +14,7 @@ import type {
   GuidedIntakeResponse,
   AutomatedReviewResponse,
   AgentChatMessage,
+  SystemConfig,
 } from '@/types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
@@ -75,6 +76,17 @@ export const documentApi = {
   seedMockJob: async (jobId?: string): Promise<DocumentExtractionStatus> => {
     const payload = jobId ? { job_id: jobId } : undefined;
     const response = await api.post<DocumentExtractionStatus>('/documents/mock-job', payload);
+    return response.data;
+  },
+};
+
+// System APIs
+export const systemApi = {
+  /**
+   * Retrieve backend runtime configuration flags needed by the frontend.
+   */
+  getConfig: async (): Promise<SystemConfig> => {
+    const response = await api.get<SystemConfig>('/system/config');
     return response.data;
   },
 };

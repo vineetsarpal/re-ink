@@ -4,7 +4,7 @@ Uses the official landingai-ade SDK for document parsing and field extraction.
 
 """
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from pathlib import Path
 from io import BytesIO
 
@@ -290,90 +290,311 @@ class LandingAIService:
         Returns:
             Dictionary with processed contract fields mapped to our database schema
         """
-        contract_data = {}
+        contract_data: Dict[str, Any] = {}
 
-        logger.info(f"Processing contract data. Available keys: {list(extract_result.keys()) if extract_result else 'None'}")
+        logger.info(
+            "Processing contract data. Available keys: %s",
+            list(extract_result.keys()) if isinstance(extract_result, dict) else "None",
+        )
 
-        # Map the extracted fields to our database schema
-        # The extraction result may have the data directly or nested under a key
-        data = extract_result
+        normalized = self._normalize_extract_payload(extract_result)
 
-        # Check if data is nested (some SDKs wrap the response)
-        if "data" in extract_result:
-            data = extract_result["data"]
-        elif "extraction" in extract_result:
-            data = extract_result["extraction"]
+        # Contract identification
+        contract_name = self._extract_field_value(
+            normalized,
+            "contract_name",
+            aliases=["contractName", "agreement_name", "agreementName"],
+        )
+        if contract_name:
+            contract_data["contract_name"] = contract_name
 
-        # Contract identification - map extracted fields to our database fields
-        # Use contract_name from extraction
-        if "contract_name" in data:
-            contract_data["contract_name"] = data["contract_name"]
-
-        # Use contract_number if available, otherwise generate from contract_name
-        if "contract_number" in data and data["contract_number"]:
-            contract_data["contract_number"] = data["contract_number"]
-        elif "contract_name" in data:
-            # Generate a contract number from the name if not provided
+        contract_number = self._extract_field_value(
+            normalized,
+            "contract_number",
+            aliases=["contractNumber", "agreement_number", "agreementNumber"],
+        )
+        if contract_number:
+            contract_data["contract_number"] = contract_number
+        elif contract_name:
             import re
-            contract_data["contract_number"] = re.sub(r'[^a-zA-Z0-9]', '-', data["contract_name"])[:50]
 
-        # Map contract_type and contract_nature
-        if "contract_type" in data:
-            contract_data["contract_type"] = data["contract_type"]
+            contract_data["contract_number"] = re.sub(r"[^a-zA-Z0-9]", "-", contract_name)[:50]
 
-        if "contract_nature" in data:
-            # Append nature to type if both exist
-            if "contract_type" in contract_data:
-                contract_data["contract_type"] = f"{contract_data['contract_type']} - {data['contract_nature']}"
-            else:
-                contract_data["contract_type"] = data["contract_nature"]
+        contract_type = self._extract_field_value(
+            normalized,
+            "contract_type",
+            aliases=["contractType", "type_of_contract", "typeOfContract"],
+        )
+        if contract_type:
+            contract_data["contract_type"] = contract_type
+
+        contract_sub_type = self._extract_field_value(
+            normalized,
+            "contract_sub_type",
+            aliases=["contract_subtype", "contractSubType", "contractSubtype"],
+        )
+        if contract_sub_type:
+            contract_data["contract_sub_type"] = contract_sub_type
+
+        contract_nature = self._extract_field_value(
+            normalized,
+            "contract_nature",
+            aliases=["contractNature", "nature_of_contract", "natureOfContract"],
+        )
+        if contract_nature:
+            contract_data["contract_nature"] = contract_nature
+
+        # If nature is embedded within the type, split into separate fields
+        if contract_type and not contract_nature:
+            for separator in (" - ", " – ", " — ", ":"):
+                if separator in contract_type:
+                    head, tail = contract_type.split(separator, 1)
+                    if head and head != contract_type:
+                        contract_data["contract_type"] = head.strip()
+                    if tail:
+                        contract_data["contract_nature"] = tail.strip()
+                    break
 
         # Date fields
-        for date_field in ["effective_date", "expiration_date"]:
-            if date_field in data and data[date_field]:
-                contract_data[date_field] = self._normalize_date(data[date_field])
+        effective_date = self._extract_field_value(
+            normalized,
+            "effective_date",
+            aliases=["effectiveDate", "inception_date", "inceptionDate"],
+        )
+        if effective_date:
+            contract_data["effective_date"] = self._normalize_date(str(effective_date))
 
-        # Financial terms - map from new schema
-        if "deductible_amount" in data and data["deductible_amount"]:
-            # Map deductible_amount to retention_amount
-            contract_data["retention_amount"] = self._clean_numeric_value(data["deductible_amount"])
+        expiration_date = self._extract_field_value(
+            normalized,
+            "expiration_date",
+            aliases=["expirationDate", "expiry_date", "expiryDate", "expiration"],
+        )
+        if expiration_date:
+            contract_data["expiration_date"] = self._normalize_date(str(expiration_date))
 
-        if "limit_covered" in data and data["limit_covered"]:
-            # Map limit_covered to limit_amount
-            contract_data["limit_amount"] = self._clean_numeric_value(data["limit_covered"])
+        # Financial terms
+        premium_amount = self._extract_field_value(
+            normalized,
+            "premium_amount",
+            aliases=["premiumAmount", "contract_premium", "contractPremium"],
+        )
+        if premium_amount:
+            cleaned_premium = self._clean_numeric_value(premium_amount)
+            if cleaned_premium is not None:
+                contract_data["premium_amount"] = cleaned_premium
 
-        if "upper_limit" in data and data["upper_limit"]:
-            # If we have upper_limit, it might override or supplement limit_amount
-            upper_limit_value = self._clean_numeric_value(data["upper_limit"])
-            if "limit_amount" not in contract_data:
-                contract_data["limit_amount"] = upper_limit_value
+        commission_rate = self._extract_field_value(
+            normalized,
+            "commission_rate",
+            aliases=["commissionRate", "broker_commission", "brokerCommission"],
+        )
+        if commission_rate:
+            cleaned_commission = self._clean_numeric_value(commission_rate)
+            if cleaned_commission is not None:
+                contract_data["commission_rate"] = cleaned_commission
+
+        deductible_amount = self._extract_field_value(
+            normalized,
+            "deductible_amount",
+            aliases=["retention_amount", "retentionAmount", "deductibleAmount"],
+        )
+        if deductible_amount:
+            cleaned_deductible = self._clean_numeric_value(deductible_amount)
+            if cleaned_deductible is not None:
+                contract_data["retention_amount"] = cleaned_deductible
+
+        limit_covered = self._extract_field_value(
+            normalized,
+            "limit_covered",
+            aliases=["limitCovered", "coverage_limit", "coverageLimit"],
+        )
+        if limit_covered:
+            cleaned_limit = self._clean_numeric_value(limit_covered)
+            if cleaned_limit is not None:
+                contract_data["limit_amount"] = cleaned_limit
+
+        upper_limit = self._extract_field_value(
+            normalized,
+            "upper_limit",
+            aliases=["upperLimit", "maximum_limit", "maximumLimit"],
+        )
+        if upper_limit:
+            cleaned_upper_limit = self._clean_numeric_value(upper_limit)
+            if cleaned_upper_limit is not None and "limit_amount" not in contract_data:
+                contract_data["limit_amount"] = cleaned_upper_limit
 
         # Coverage details
-        if "attachment_criteria" in data and data["attachment_criteria"]:
-            contract_data["coverage_description"] = data["attachment_criteria"]
+        attachment_criteria = self._extract_field_value(
+            normalized,
+            "attachment_criteria",
+            aliases=["attachmentCriteria", "coverage_description", "coverageDescription"],
+        )
+        if attachment_criteria:
+            contract_data["coverage_description"] = attachment_criteria
 
-        # Optional fields that match directly
-        optional_fields = [
-            "line_of_business", "coverage_territory", "terms_and_conditions", "special_provisions"
-        ]
-        for field in optional_fields:
-            if field in data and data[field]:
-                contract_data[field] = data[field]
+        optional_fields = {
+            "line_of_business": ["lineOfBusiness", "lob"],
+            "coverage_territory": ["coverageTerritory", "territory"],
+            "terms_and_conditions": ["termsAndConditions", "terms_conditions"],
+            "special_provisions": ["specialProvisions", "special_clauses"],
+            "currency": ["currency_code", "currencyCode"],
+        }
+        for field, aliases in optional_fields.items():
+            value = self._extract_field_value(normalized, field, aliases=aliases)
+            if value:
+                if field == "currency":
+                    currency = str(value).upper()
+                    if len(currency) == 3:
+                        contract_data["currency"] = currency
+                else:
+                    contract_data[field] = value
 
-        # Currency
-        if "currency" in data and data["currency"]:
-            currency = data["currency"].upper()
-            if len(currency) == 3:
-                contract_data["currency"] = currency
-        else:
-            contract_data["currency"] = "USD"  # Default
+        # Default currency if missing
+        contract_data.setdefault("currency", "USD")
 
-        # Log warning if no contract data was extracted
-        if not contract_data or len(contract_data) <= 1:
+        if not contract_data:
             logger.warning("No contract data was extracted from the document!")
-            logger.warning(f"Extract result had keys: {list(data.keys()) if data else 'Empty'}")
+            if normalized:
+                logger.warning("Extract result had keys: %s", list(normalized.keys()))
+            else:
+                logger.warning("Extract result payload was empty.")
 
         return contract_data
+
+    def _normalize_extract_payload(self, extract_result: Any) -> Dict[str, Any]:
+        """
+        Flatten nested extraction payloads into a simple dictionary mapping
+        field names to scalar values. Handles common LandingAI shapes where fields are
+        nested under ``data``, ``extraction``, or ``fields`` arrays.
+        """
+        flattened: Dict[str, Any] = {}
+        seen: set[int] = set()
+
+        def walk(node: Any) -> None:
+            node_id = id(node)
+            if node_id in seen:
+                return
+            seen.add(node_id)
+
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if not isinstance(key, str):
+                        continue
+                    lowered_key = key.lower()
+                    if lowered_key in {"confidence", "confidence_score"}:
+                        continue
+
+                    if lowered_key == "fields" and isinstance(value, list):
+                        for entry in value:
+                            if not isinstance(entry, dict):
+                                continue
+                            name = (
+                                entry.get("name")
+                                or entry.get("field_name")
+                                or entry.get("key")
+                                or entry.get("label")
+                            )
+                            if not name:
+                                continue
+                            entry_value = (
+                                entry.get("value")
+                                or entry.get("text")
+                                or entry.get("content")
+                                or entry.get("raw")
+                            )
+                            if entry_value is None:
+                                entry_value = entry
+                            extracted = self._unwrap_field_value(entry_value)
+                            if extracted is not None and name not in flattened:
+                                flattened[name] = extracted
+                            walk(entry)
+                        continue
+
+                    extracted = self._unwrap_field_value(value)
+                    if extracted is not None and key not in flattened:
+                        flattened[key] = extracted
+
+                    walk(value)
+
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item)
+
+        walk(extract_result)
+        return flattened
+
+    @staticmethod
+    def _unwrap_field_value(value: Any) -> Optional[Any]:
+        """
+        Extract the most relevant scalar value from nested field structures.
+        """
+        if value is None:
+            return None
+
+        if isinstance(value, (int, float)):
+            return value
+
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+
+        if isinstance(value, dict):
+            priority_keys = ["value", "text", "content", "answer", "raw", "body"]
+            for key in priority_keys:
+                if key in value:
+                    extracted = LandingAIService._unwrap_field_value(value[key])
+                    if extracted is not None:
+                        return extracted
+
+            values = value.get("values")
+            if isinstance(values, list):
+                for item in values:
+                    extracted = LandingAIService._unwrap_field_value(item)
+                    if extracted is not None:
+                        return extracted
+
+            if len(value) == 1:
+                extracted = LandingAIService._unwrap_field_value(next(iter(value.values())))
+                if extracted is not None:
+                    return extracted
+
+            return None
+
+        if isinstance(value, list):
+            for item in value:
+                extracted = LandingAIService._unwrap_field_value(item)
+                if extracted is not None:
+                    return extracted
+            return None
+
+        return value
+
+    def _extract_field_value(
+        self,
+        normalized: Dict[str, Any],
+        field_name: str,
+        *,
+        aliases: Optional[List[str]] = None,
+    ) -> Optional[Any]:
+        """
+        Look up a field by name (or alias) within a normalized extraction payload.
+        Keys are compared case-insensitively.
+        """
+        if not normalized:
+            return None
+
+        candidates = [field_name] + (aliases or [])
+        for candidate in candidates:
+            if candidate in normalized and normalized[candidate] not in (None, "", []):
+                return normalized[candidate]
+
+        lower_map = {key.lower(): value for key, value in normalized.items()}
+        for candidate in candidates:
+            lowered = candidate.lower()
+            if lowered in lower_map and lower_map[lowered] not in (None, "", []):
+                return lower_map[lowered]
+
+        return None
 
     def _process_parties_data(self, extract_result: Dict[str, Any]) -> list:
         """
@@ -387,36 +608,39 @@ class LandingAIService:
         """
         parties_data = []
 
-        # Check if data is nested
-        data = extract_result
-        if "data" in extract_result:
-            data = extract_result["data"]
-        elif "extraction" in extract_result:
-            data = extract_result["extraction"]
+        normalized = self._normalize_extract_payload(extract_result)
 
-        logger.info(f"Processing parties data from cedant/reinsurer fields")
+        logger.info("Processing parties data from cedant/reinsurer fields")
 
-        # Extract cedant
-        if "cedant_name" in data and data["cedant_name"]:
+        cedant_name = self._extract_field_value(
+            normalized,
+            "cedant_name",
+            aliases=["cedent_name", "cedantName", "cedentName"],
+        )
+        if cedant_name:
             cedant = {
-                "name": data["cedant_name"],
+                "name": cedant_name,
                 "party_type": "cedant",
-                "is_active": True
+                "is_active": True,
             }
             parties_data.append(cedant)
-            logger.info(f"Processed cedant: {cedant['name']}")
+            logger.info("Processed cedant: %s", cedant_name)
 
-        # Extract reinsurer
-        if "reinsurer_name" in data and data["reinsurer_name"]:
+        reinsurer_name = self._extract_field_value(
+            normalized,
+            "reinsurer_name",
+            aliases=["reinsurerName", "reinsurer", "retrocessionaire_name"],
+        )
+        if reinsurer_name:
             reinsurer = {
-                "name": data["reinsurer_name"],
+                "name": reinsurer_name,
                 "party_type": "reinsurer",
-                "is_active": True
+                "is_active": True,
             }
             parties_data.append(reinsurer)
-            logger.info(f"Processed reinsurer: {reinsurer['name']}")
+            logger.info("Processed reinsurer: %s", reinsurer_name)
 
-        logger.info(f"Total parties processed: {len(parties_data)}")
+        logger.info("Total parties processed: %d", len(parties_data))
         return parties_data
 
     @staticmethod
