@@ -94,6 +94,24 @@ re-ink is a full-stack web application that streamlines reinsurance contract man
 
 ## Quick Start
 
+### Rapid Start via Makefile
+
+The repo includes a Makefile so you can bootstrap both services quickly:
+
+```bash
+# Install backend + frontend dependencies
+make setup
+
+# Copy and edit environment files (run once)
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
+
+# Launch both dev servers (Ctrl+C stops both)
+make dev
+```
+
+Use `make backend-dev` or `make frontend-dev` if you want to run either side individually, and `make backend-install` / `make frontend-install` to refresh dependencies.
+
 ### Prerequisites
 
 - Python 3.9+
@@ -123,6 +141,7 @@ alembic upgrade head
 
 # Run server
 uvicorn app.main:app --reload
+# or use: make backend-dev
 ```
 
 Backend will be available at http://localhost:8000
@@ -142,6 +161,7 @@ cp .env.example .env
 
 # Run development server
 npm run dev
+# or use: make frontend-dev
 ```
 
 Frontend will be available at http://localhost:3000
