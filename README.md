@@ -4,7 +4,7 @@
 
 re-ink is a full-stack web application that streamlines reinsurance contract management by automatically extracting contract details and party information from uploaded documents using AI-powered document extraction.
 
-## 🏆 Recognition
+## Recognition
 
 **Finalist** in the [LandingAI Financial AI Hackathon Championship 2025](https://community.landing.ai/c/events-ade/financial-ai-hackathon-championship-2025)
 
