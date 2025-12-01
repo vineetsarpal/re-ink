@@ -9,7 +9,7 @@ re-ink is a full-stack web application that streamlines reinsurance contract man
 **Finalist** in the [LandingAI Financial AI Hackathon Championship 2025](https://community.landing.ai/c/events-ade/financial-ai-hackathon-championship-2025)
 
 ## Demo
-[![Watch the demo](https://www.youtube.com/watch?v=ylZ9jSDByLQ)](https://www.youtube.com/watch?v=ylZ9jSDByLQ)
+ [![Watch the demo](https://img.youtube.com/vi/ylZ9jSDByLQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=ylZ9jSDByLQ)
 
 ## Features
 
@@ -23,9 +23,6 @@ re-ink is a full-stack web application that streamlines reinsurance contract man
 - 🧪 **Sample Extraction Mode**: Seed mock data to test the workflow without LandingAI
 - 🤝 **AI Agent Guidance**: LangChain/LangGraph agents surface intake insights and automated reviews
 
-## UI Preview
-
-![re-ink home page](assets/screenshots/home-pg.png)
 
 ## Sample Documents
 
