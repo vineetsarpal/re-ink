@@ -9,6 +9,7 @@ import type {
   DocumentUploadResponse,
   DocumentExtractionStatus,
   ExtractionResult,
+  ExtractionConfig,
   ReviewData,
   ReviewApprovalResponse,
   GuidedIntakeResponse,
@@ -31,9 +32,15 @@ export const documentApi = {
   /**
    * Upload a document for extraction.
    */
-  upload: async (file: File): Promise<DocumentUploadResponse> => {
+  upload: async (file: File, config?: ExtractionConfig): Promise<DocumentUploadResponse> => {
     const formData = new FormData();
     formData.append('file', file);
+    if (config) {
+      formData.append('extraction_backend', config.backend);
+      if (config.apiKey) {
+        formData.append('api_key', config.apiKey);
+      }
+    }
 
     const response = await api.post<DocumentUploadResponse>(
       '/documents/upload',

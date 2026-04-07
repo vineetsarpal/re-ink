@@ -1,9 +1,9 @@
 """
 API endpoints for document upload and extraction workflow.
 """
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from datetime import datetime
 import logging
 
@@ -15,11 +15,44 @@ from app.schemas.document import (
     ReviewApprovalResponse,
     ExtractionResult
 )
+from app.core.config import settings
 from app.services.document_service import document_service
-from app.services.landingai_service import landingai_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _get_extraction_service(backend: str, api_key: str = ""):
+    """Create an extraction service instance for the given backend + API key."""
+    if backend == "landingai":
+        from app.services.landingai_service import LandingAIService
+        svc = LandingAIService.__new__(LandingAIService)
+        svc.api_key = api_key or settings.LANDINGAI_API_KEY
+        svc.parse_model = settings.LANDINGAI_PARSE_MODEL
+        svc.extract_model = settings.LANDINGAI_EXTRACT_MODEL
+        from landingai_ade import LandingAIADE
+        svc.client = LandingAIADE(apikey=svc.api_key)
+        return svc
+
+    if backend == "anthropic":
+        from app.services.anthropic_extraction_service import AnthropicExtractionService
+        key = api_key or settings.ANTHROPIC_API_KEY
+        if not key:
+            raise HTTPException(status_code=400, detail="Anthropic API key is required for the anthropic backend.")
+        return AnthropicExtractionService(api_key=key)
+
+    if backend == "openai":
+        from app.services.free_extraction_service import FreeExtractionService
+        key = api_key or settings.OPENAI_API_KEY
+        if not key:
+            raise HTTPException(status_code=400, detail="OpenAI API key is required for the openai backend.")
+        return FreeExtractionService(openai_api_key=key)
+
+    if backend == "free":
+        from app.services.free_extraction_service import free_extraction_service
+        return free_extraction_service
+
+    raise HTTPException(status_code=400, detail=f"Unknown extraction backend: {backend}")
 
 # In-memory storage for extraction jobs (in production, use Redis or database)
 extraction_jobs: Dict[str, Dict[str, Any]] = {}
@@ -29,7 +62,9 @@ extraction_jobs: Dict[str, Dict[str, Any]] = {}
 async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    extraction_backend: Optional[str] = Form(None),
+    api_key: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
 ):
     """
     Upload a reinsurance contract document for processing.
@@ -37,18 +72,23 @@ async def upload_document(
     This endpoint:
     1. Validates the uploaded file
     2. Saves it to disk
-    3. Initiates extraction job with LandingAI
+    3. Initiates extraction job with the selected backend
     4. Returns job ID for status tracking
     """
     try:
+        # Resolve extraction backend (per-request or server default)
+        backend = extraction_backend or settings.EXTRACTION_BACKEND
+        service = _get_extraction_service(backend, api_key or "")
+
         # Save the uploaded file
         file_info = await document_service.save_uploaded_file(file)
 
-        # Submit to LandingAI for extraction (in background)
+        # Submit for extraction (in background)
         background_tasks.add_task(
             process_document_extraction,
             file_info["file_path"],
-            file_info["job_id"]
+            file_info["job_id"],
+            service,
         )
 
         # Store initial job status
@@ -75,26 +115,30 @@ async def upload_document(
         raise HTTPException(status_code=500, detail="Error uploading document")
 
 
-async def process_document_extraction(file_path: str, job_id: str):
+async def process_document_extraction(file_path: str, job_id: str, service):
     """
-    Background task to process document extraction via LandingAI ADE Parse API.
-    
-    ADE Parse is synchronous and returns results immediately, but processing
-    can take time, so we run it in a background task.
+    Background task to process document extraction.
+
+    The service instance is created per-request based on the user's chosen
+    backend and API key.
     """
     try:
         # Update job status to processing
         extraction_jobs[job_id].update({
             "status": "processing",
-            "message": "Processing document with LandingAI ADE Parse..."
+            "message": "Processing document with extraction backend..."
         })
 
-        # Parse document using LandingAI ADE Parse API
-        # This is synchronous but may take time for large documents
-        raw_results = await landingai_service.submit_document_for_extraction(file_path)
-        
+        # Progress callback — updates the job message visible to the polling frontend
+        def update_progress(msg: str):
+            extraction_jobs[job_id]["message"] = msg
+
+        raw_results = await service.submit_document_for_extraction(
+            file_path, progress_callback=update_progress
+        )
+
         # Parse the results to extract contract and party data
-        parsed_results = landingai_service.parse_extraction_results(raw_results)
+        parsed_results = service.parse_extraction_results(raw_results)
         
         # Extract job_id from metadata
         job_id_from_api = raw_results.get("metadata", {}).get("job_id")
@@ -147,7 +191,9 @@ async def get_extraction_status(job_id: str):
             # If parsing fails, try to parse from raw results
             if "raw_results" in job:
                 try:
-                    parsed_results = landingai_service.parse_extraction_results(job["raw_results"])
+                    from app.services.landingai_service import LandingAIService
+                    _helper = LandingAIService.__new__(LandingAIService)
+                    parsed_results = _helper.parse_extraction_results(job["raw_results"])
                     result = ExtractionResult(**parsed_results)
                 except Exception as parse_error:
                     logger.error(f"Error parsing raw results: {str(parse_error)}")
@@ -193,7 +239,9 @@ async def get_extraction_results(job_id: str):
             return ExtractionResult(**parsed_results)
         elif "raw_results" in job:
             # Parse from raw results if parsed results not available
-            parsed_results = landingai_service.parse_extraction_results(job["raw_results"])
+            from app.services.landingai_service import LandingAIService
+            _helper = LandingAIService.__new__(LandingAIService)
+            parsed_results = _helper.parse_extraction_results(job["raw_results"])
             return ExtractionResult(**parsed_results)
         else:
             raise HTTPException(

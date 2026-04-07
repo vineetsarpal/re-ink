@@ -11,10 +11,29 @@ import { agentApi, documentApi, systemApi } from '@/services/api';
 import type {
   DocumentUploadResponse,
   DocumentExtractionStatus,
+  ExtractionBackend,
+  ExtractionConfig,
   GuidedIntakeResponse,
 } from '@/types';
 
 type WorkflowStep = 'upload' | 'processing' | 'review';
+
+const STORAGE_KEY = 'reink_extraction_config';
+
+const BACKEND_INFO: Record<ExtractionBackend, { label: string; description: string; keyName: string }> = {
+  landingai: { label: 'LandingAI', description: 'Best quality — uses LandingAI ADE API', keyName: 'LandingAI API Key' },
+  openai: { label: 'OpenAI', description: 'GPT-4o-mini extraction — fast and affordable', keyName: 'OpenAI API Key' },
+  anthropic: { label: 'Anthropic (Claude)', description: 'Claude PDF vision — single-call extraction', keyName: 'Anthropic API Key' },
+  free: { label: 'Free (Local Ollama)', description: 'No API key needed — runs locally via Ollama', keyName: '' },
+};
+
+const loadConfig = (): ExtractionConfig => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) return JSON.parse(stored);
+  } catch { /* ignore */ }
+  return { backend: 'free', apiKey: '' };
+};
 
 export const UploadPage: React.FC = () => {
   const navigate = useNavigate();
@@ -30,6 +49,12 @@ export const UploadPage: React.FC = () => {
   const [intakeError, setIntakeError] = useState<string | null>(null);
   const lastAgentJobId = useRef<string | null>(null);
   const [isOfflineMode, setIsOfflineMode] = useState(false);
+  const [extractionConfig, setExtractionConfig] = useState<ExtractionConfig>(loadConfig);
+
+  // Persist extraction config to localStorage
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(extractionConfig));
+  }, [extractionConfig]);
 
   const handleUploadSuccess = (response: DocumentUploadResponse) => {
     setUploadResponse(response);
@@ -125,7 +150,13 @@ export const UploadPage: React.FC = () => {
   useEffect(() => {
     systemApi
       .getConfig()
-      .then((config) => setIsOfflineMode(config.agent_offline_mode))
+      .then((config) => {
+        setIsOfflineMode(config.agent_offline_mode);
+        // If no stored config, use server default
+        if (!localStorage.getItem(STORAGE_KEY) && config.default_backend) {
+          setExtractionConfig((prev) => ({ ...prev, backend: config.default_backend }));
+        }
+      })
       .catch((error) => {
         console.error('Failed to load system configuration', error);
       });
@@ -191,9 +222,43 @@ export const UploadPage: React.FC = () => {
       <div className="step-content">
         {currentStep === 'upload' && (
           <>
+            <div className="extraction-config">
+              <h3>Extraction Backend</h3>
+              <div className="backend-options">
+                {(Object.keys(BACKEND_INFO) as ExtractionBackend[]).map((b) => (
+                  <label key={b} className={`backend-option${extractionConfig.backend === b ? ' selected' : ''}`}>
+                    <input
+                      type="radio"
+                      name="backend"
+                      value={b}
+                      checked={extractionConfig.backend === b}
+                      onChange={() => setExtractionConfig((prev) => ({ ...prev, backend: b, apiKey: b === prev.backend ? prev.apiKey : '' }))}
+                    />
+                    <div className="backend-option-text">
+                      <span className="backend-label">{BACKEND_INFO[b].label}</span>
+                      <span className="backend-description">{BACKEND_INFO[b].description}</span>
+                    </div>
+                  </label>
+                ))}
+              </div>
+              {extractionConfig.backend !== 'free' && (
+                <div className="api-key-input">
+                  <label htmlFor="api-key">{BACKEND_INFO[extractionConfig.backend].keyName}</label>
+                  <input
+                    id="api-key"
+                    type="password"
+                    value={extractionConfig.apiKey}
+                    onChange={(e) => setExtractionConfig((prev) => ({ ...prev, apiKey: e.target.value }))}
+                    placeholder={`Enter your ${BACKEND_INFO[extractionConfig.backend].keyName}`}
+                  />
+                </div>
+              )}
+            </div>
+
             <FileUpload
               onUploadSuccess={handleUploadSuccess}
               onUploadError={(error) => alert(error)}
+              extractionConfig={extractionConfig}
             />
             {isOfflineMode && (
               <div className="mock-upload">

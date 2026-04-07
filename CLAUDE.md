@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**re-ink** is a full-stack web application for automated reinsurance contract and party management. Users upload PDF/DOCX reinsurance documents, which are processed by LandingAI's Agentic Document Extraction API. Extracted data is reviewed and approved to create structured Contract and Party records. A LangChain/LangGraph agent layer provides guided intake and automated contract review.
+**re-ink** is a full-stack web application for automated reinsurance contract and party management. Users upload PDF/DOCX reinsurance documents, which are processed via a BYOK (bring-your-own-key) extraction system supporting four backends: LandingAI, OpenAI, Anthropic (Claude), or Free (local Ollama). Extracted data is reviewed and approved to create structured Contract and Party records. A LangChain/LangGraph agent layer provides guided intake and automated contract review.
 
-**Stack**: FastAPI + SQLAlchemy + PostgreSQL + LandingAI (backend) · React 18 + TypeScript + Vite + React Query (frontend)
+**Stack**: FastAPI + SQLAlchemy + PostgreSQL (backend) · React 18 + TypeScript + Vite (frontend)
 
 ## Development Commands
 
@@ -22,11 +22,11 @@ make frontend-dev   # Frontend only (vite --host, port 3000)
 ### Backend (from `backend/`)
 
 ```bash
-source venv/bin/activate
-alembic upgrade head                              # Apply migrations
-alembic revision --autogenerate -m "description" # New migration
-pytest                                            # Run tests
-uvicorn app.main:app --reload                     # Dev server
+uv sync --group dev                                          # Install / sync dependencies
+uv run alembic upgrade head                                  # Apply migrations
+uv run alembic revision --autogenerate -m "description"      # New migration
+uv run pytest                                                # Run tests
+uv run uvicorn app.main:app --reload                         # Dev server
 ```
 
 ### Frontend (from `frontend/`)
@@ -44,7 +44,7 @@ npm run lint    # ESLint check (required before PR)
 Layered FastAPI service under `backend/app/`:
 
 - **`api/endpoints/`**: Thin route handlers per resource — `documents.py`, `contracts.py`, `parties.py`, `review.py`, `agents.py`, `system.py`
-- **`services/`**: Business logic — `landingai_service.py` (ADE API calls), `document_service.py` (upload/validation), `agent_service.py` (LangChain/LangGraph agents), `extraction_store.py` (in-memory job store for extraction status)
+- **`services/`**: Business logic — `landingai_service.py` (LandingAI ADE), `free_extraction_service.py` (local Ollama / OpenAI), `anthropic_extraction_service.py` (Claude PDF vision), `document_service.py` (upload/validation), `agent_service.py` (LangChain/LangGraph agents), `extraction_store.py` (in-memory job store for extraction status)
 - **`models/`**: SQLAlchemy ORM models; `contract_parties` association table links Contracts ↔ Parties with a `role` field
 - **`schemas/`**: Pydantic schemas for request/response validation
 - **`core/config.py`**: All settings via `pydantic-settings`
@@ -61,7 +61,7 @@ Vite + React under `frontend/src/`:
 
 ### Key Workflow
 
-1. `POST /api/documents/upload` — saves file, starts LandingAI extraction job
+1. `POST /api/documents/upload` — saves file, starts extraction (accepts `extraction_backend` + `api_key` form fields for BYOK)
 2. `GET /api/documents/status/{job_id}` — polled by `ExtractionStatus` until `completed`/`failed`
 3. `GET /api/documents/results/{job_id}` — returns parsed extraction data
 4. `POST /api/review/approve` — creates Contract + Party records from reviewed data
@@ -73,17 +73,16 @@ Vite + React under `frontend/src/`:
 
 ```env
 DATABASE_URL=postgresql://user:password@localhost:5432/reink_db
-LANDINGAI_API_KEY=your_key
-LANDINGAI_PARSE_URL=https://api.va.landing.ai/v1/ade/parse
-LANDINGAI_EXTRACT_URL=https://api.va.landing.ai/v1/ade/extract
-LANDINGAI_PARSE_MODEL=dpt-2-latest
-LANDINGAI_EXTRACT_MODEL=extract-latest
+EXTRACTION_BACKEND=free            # "landingai", "openai", "anthropic", or "free" (server default; users override via UI)
+LANDINGAI_API_KEY=                 # Only needed for landingai backend
+OPENAI_API_KEY=                    # Needed for openai backend and agent endpoints
+ANTHROPIC_API_KEY=                 # Needed for anthropic backend
+FREE_PARSE_BACKEND=pypdf           # "pypdf" or "glm-ocr" (for free backend)
+FREE_OLLAMA_BASE_URL=http://localhost:11434
 UPLOAD_DIR=./uploads
-MAX_UPLOAD_SIZE=52428800
 ALLOWED_ORIGINS=["http://localhost:3000","http://localhost:5173"]
-OPENAI_API_KEY=your_openai_key    # Only needed for agent endpoints
 AGENT_MODEL=gpt-4o-mini
-AGENT_OFFLINE_MODE=false          # Set true to skip LLM calls locally
+AGENT_OFFLINE_MODE=false
 ```
 
 ### Frontend (`frontend/.env`)
@@ -99,8 +98,8 @@ VITE_API_BASE_URL=http://localhost:8000/api
 ## Testing
 
 ```bash
-cd backend && pytest                    # All backend tests
-cd backend && pytest tests/test_mock_agents.py  # Single file
+cd backend && uv run pytest                               # All backend tests
+cd backend && uv run pytest tests/test_mock_agents.py    # Single file
 ```
 
 No frontend test runner is bundled. Keep `npm run lint` clean; document manual verification in PRs.
@@ -122,6 +121,6 @@ No frontend test runner is bundled. Keep `npm run lint` clean; document manual v
 | POST | `/api/review/reject/{job_id}` | Reject extraction |
 | POST | `/api/agents/intake` | Guided intake agent |
 | POST | `/api/agents/review` | Automated contract review agent |
-| GET | `/api/system/config` | Agent config flags for frontend |
+| GET | `/api/system/config` | Config flags + available backends for frontend |
 
 API docs available at `http://localhost:8000/docs` when the backend is running.

@@ -5,16 +5,18 @@
 import React, { useState, useCallback } from 'react';
 import { Upload, FileText, AlertCircle } from 'lucide-react';
 import { documentApi } from '@/services/api';
-import type { DocumentUploadResponse } from '@/types';
+import type { DocumentUploadResponse, ExtractionConfig } from '@/types';
 
 interface FileUploadProps {
   onUploadSuccess?: (response: DocumentUploadResponse) => void;
   onUploadError?: (error: string) => void;
+  extractionConfig?: ExtractionConfig;
 }
 
 export const FileUpload: React.FC<FileUploadProps> = ({
   onUploadSuccess,
   onUploadError,
+  extractionConfig,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -82,7 +84,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     setError(null);
 
     try {
-      const response = await documentApi.upload(selectedFile);
+      const response = await documentApi.upload(selectedFile, extractionConfig);
       onUploadSuccess?.(response);
       setSelectedFile(null);
     } catch (err: any) {

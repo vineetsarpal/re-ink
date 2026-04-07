@@ -22,8 +22,18 @@ pypdf==3.17.1
 httpx==0.25.2
 aiofiles==23.2.1
 
-# LandingAI ADE SDK
+# LandingAI ADE SDK (required only when EXTRACTION_BACKEND=landingai)
 landingai-ade==0.20.3
+
+# Anthropic SDK (required only when using anthropic extraction backend)
+anthropic>=0.39.0
+
+# Free Extraction (required only when EXTRACTION_BACKEND=free with provider=ollama)
+langchain-ollama>=0.2.0
+
+# Free Parse Backend: GLM-OCR (required only when FREE_PARSE_BACKEND=glm-ocr)
+# No external system dependencies — pure Python PDF→image conversion
+pymupdf>=1.24.0
 
 # Authentication & Security
 python-jose[cryptography]==3.3.0

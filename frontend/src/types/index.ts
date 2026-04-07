@@ -2,6 +2,13 @@
  * TypeScript type definitions for re-ink application.
  */
 
+export type ExtractionBackend = 'landingai' | 'openai' | 'anthropic' | 'free';
+
+export interface ExtractionConfig {
+  backend: ExtractionBackend;
+  apiKey: string;
+}
+
 export interface Party {
   id: number;
   name: string;
@@ -145,4 +152,6 @@ export type PartyType = 'cedant' | 'reinsurer' | 'broker' | 'other';
 
 export interface SystemConfig {
   agent_offline_mode: boolean;
+  available_backends: ExtractionBackend[];
+  default_backend: ExtractionBackend;
 }

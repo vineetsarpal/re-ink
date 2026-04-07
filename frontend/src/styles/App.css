@@ -1646,3 +1646,113 @@ tbody tr:last-child td {
     font-size: 1rem;
   }
 }
+
+/* ============================================
+   EXTRACTION BACKEND CONFIG (BYOK)
+   ============================================ */
+
+.extraction-config {
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.extraction-config h3 {
+  margin-bottom: 16px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.backend-options {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.backend-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px;
+  border: 2px solid var(--border-color);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  background: var(--surface);
+}
+
+.backend-option:hover {
+  border-color: var(--secondary-color);
+}
+
+.backend-option.selected {
+  border-color: var(--primary-color);
+  background: rgba(37, 99, 235, 0.04);
+}
+
+.backend-option input[type="radio"] {
+  margin-top: 2px;
+  accent-color: var(--primary-color);
+}
+
+.backend-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.backend-label {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+}
+
+.backend-description {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.api-key-input {
+  margin-top: 16px;
+}
+
+.api-key-input label {
+  display: block;
+  font-weight: 500;
+  font-size: 0.875rem;
+  margin-bottom: 6px;
+  color: var(--text-primary);
+}
+
+.api-key-input input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  background: var(--surface);
+  color: var(--text-primary);
+  transition: border-color 0.15s;
+}
+
+.api-key-input input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.api-key-input input::placeholder {
+  color: var(--text-secondary);
+}
+
+@media (max-width: 768px) {
+  .backend-options {
+    grid-template-columns: 1fr;
+  }
+}
