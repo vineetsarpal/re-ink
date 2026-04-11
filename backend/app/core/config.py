@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str
 
     # LandingAI Configuration
-    LANDINGAI_API_KEY: str
+    LANDINGAI_API_KEY: str = ""
     LANDINGAI_PARSE_URL: str = "https://api.va.landing.ai/v1/ade/parse"
     LANDINGAI_EXTRACT_URL: str = "https://api.va.landing.ai/v1/ade/extract"
     LANDINGAI_PARSE_MODEL: str = "dpt-2-latest"

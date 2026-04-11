@@ -23,10 +23,14 @@ class ContractBase(BaseModel):
     effective_date: date
     expiration_date: date
     inception_date: Optional[date] = None
+    premium_description: Optional[str] = None
     premium_amount: Optional[Decimal] = None
     currency: str = "USD"
+    limit_description: Optional[str] = None
     limit_amount: Optional[Decimal] = None
+    retention_description: Optional[str] = None
     retention_amount: Optional[Decimal] = None
+    commission_description: Optional[str] = None
     commission_rate: Optional[Decimal] = None
     line_of_business: Optional[str] = None
     coverage_territory: Optional[str] = None
@@ -53,10 +57,14 @@ class ContractUpdate(BaseModel):
     effective_date: Optional[date] = None
     expiration_date: Optional[date] = None
     inception_date: Optional[date] = None
+    premium_description: Optional[str] = None
     premium_amount: Optional[Decimal] = None
     currency: Optional[str] = None
+    limit_description: Optional[str] = None
     limit_amount: Optional[Decimal] = None
+    retention_description: Optional[str] = None
     retention_amount: Optional[Decimal] = None
+    commission_description: Optional[str] = None
     commission_rate: Optional[Decimal] = None
     line_of_business: Optional[str] = None
     coverage_territory: Optional[str] = None

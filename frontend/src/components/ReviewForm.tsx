@@ -278,11 +278,22 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
             </div>
 
             <div className="form-field">
-              <label htmlFor="premium_amount">Premium</label>
+              <label htmlFor="premium_description">Premium</label>
+              <input
+                id="premium_description"
+                {...register('contract.premium_description')}
+                disabled={!isEditing}
+                placeholder="e.g. 100% of gross premium"
+              />
+            </div>
+
+            <div className="form-field">
+              <label htmlFor="premium_amount">Premium Amount</label>
               <input
                 id="premium_amount"
                 {...register('contract.premium_amount')}
                 disabled={!isEditing}
+                placeholder="Numeric value if applicable"
               />
             </div>
 
@@ -297,20 +308,52 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
             </div>
 
             <div className="form-field">
-              <label htmlFor="limit_amount">Limit</label>
+              <label htmlFor="limit_description">Limit</label>
               <input
-                id="limit_amount"
-                {...register('contract.limit_amount')}
+                id="limit_description"
+                {...register('contract.limit_description')}
                 disabled={!isEditing}
+                placeholder="e.g. 100% quota share"
               />
             </div>
 
             <div className="form-field">
-              <label htmlFor="retention_amount">Retention/Deductible Amount</label>
+              <label htmlFor="limit_amount">Limit Amount</label>
+              <input
+                id="limit_amount"
+                {...register('contract.limit_amount')}
+                disabled={!isEditing}
+                placeholder="Numeric value if applicable"
+              />
+            </div>
+
+            <div className="form-field">
+              <label htmlFor="retention_description">Retention/Deductible</label>
+              <input
+                id="retention_description"
+                {...register('contract.retention_description')}
+                disabled={!isEditing}
+                placeholder="e.g. $150,000,000 net of recoveries"
+              />
+            </div>
+
+            <div className="form-field">
+              <label htmlFor="retention_amount">Retention Amount</label>
               <input
                 id="retention_amount"
                 {...register('contract.retention_amount')}
                 disabled={!isEditing}
+                placeholder="Numeric value if applicable"
+              />
+            </div>
+
+            <div className="form-field">
+              <label htmlFor="commission_description">Commission</label>
+              <input
+                id="commission_description"
+                {...register('contract.commission_description')}
+                disabled={!isEditing}
+                placeholder="e.g. all expenses + 0.5% of net written premium"
               />
             </div>
 
@@ -320,6 +363,7 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
                 id="commission_rate"
                 {...register('contract.commission_rate')}
                 disabled={!isEditing}
+                placeholder="Numeric value if applicable"
               />
             </div>
 

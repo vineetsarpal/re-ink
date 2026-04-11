@@ -41,11 +41,15 @@ class Contract(Base):
     expiration_date = Column(Date, nullable=False)
     inception_date = Column(Date)
 
-    # Financial Terms
+    # Financial Terms — each has a free-text description and an optional numeric amount
+    premium_description = Column(String(255))  # Raw extracted text, e.g. "100% of gross premium"
     premium_amount = Column(Numeric(precision=15, scale=2))
     currency = Column(String(3), default="USD")  # ISO 4217 currency code
+    limit_description = Column(String(255))  # e.g. "100% quota share"
     limit_amount = Column(Numeric(precision=15, scale=2))
+    retention_description = Column(String(255))  # e.g. "$150,000,000 net of recoveries"
     retention_amount = Column(Numeric(precision=15, scale=2))
+    commission_description = Column(String(255))  # e.g. "all expenses + 0.5% of net written premium"
     commission_rate = Column(Numeric(precision=5, scale=2))  # Percentage
 
     # Coverage Details

@@ -32,10 +32,14 @@ export interface Contract {
   effective_date: string;
   expiration_date: string;
   inception_date?: string;
+  premium_description?: string;
   premium_amount?: number;
   currency: string;
+  limit_description?: string;
   limit_amount?: number | string;
+  retention_description?: string;
   retention_amount?: number;
+  commission_description?: string;
   commission_rate?: number;
   line_of_business?: string;
   coverage_territory?: string;

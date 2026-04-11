@@ -30,10 +30,14 @@ const api = axios.create({
 export const documentApi = {
   /**
    * Upload a document for extraction.
+   * @param apiKey - LandingAI API key supplied by the user (BYOK)
    */
-  upload: async (file: File): Promise<DocumentUploadResponse> => {
+  upload: async (file: File, apiKey?: string): Promise<DocumentUploadResponse> => {
     const formData = new FormData();
     formData.append('file', file);
+    if (apiKey) {
+      formData.append('api_key', apiKey);
+    }
 
     const response = await api.post<DocumentUploadResponse>(
       '/documents/upload',
