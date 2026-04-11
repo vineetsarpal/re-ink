@@ -43,25 +43,47 @@ GUIDED_REQUIRED_FIELDS = [
 
 
 def _resolve_llm():
-    """Instantiate the default chat model used by agents."""
-    try:
-        from langchain_openai import ChatOpenAI
-    except ImportError as exc:  # pragma: no cover - only hit when deps missing
-        raise AgentConfigurationError(
-            "langchain-openai is required for agent execution. "
-            "Install dependencies via `pip install langchain-openai`."
-        ) from exc
+    """Instantiate the chat model used by agents based on LLM_PROVIDER setting."""
+    provider = settings.LLM_PROVIDER.lower()
 
-    api_key = settings.OPENAI_API_KEY
-    if not api_key:
-        raise AgentConfigurationError(
-            "OPENAI_API_KEY is not configured. Set it in backend/.env before running agents."
+    if provider == "ollama":
+        try:
+            from langchain_ollama import ChatOllama
+        except ImportError as exc:
+            raise AgentConfigurationError(
+                "langchain-ollama is required for Ollama provider. "
+                "Install via `pip install langchain-ollama`."
+            ) from exc
+
+        return ChatOllama(
+            model=settings.OLLAMA_MODEL,
+            base_url=settings.OLLAMA_BASE_URL,
+            temperature=settings.AGENT_TEMPERATURE,
         )
 
-    return ChatOpenAI(
-        model=settings.AGENT_MODEL,
-        temperature=settings.AGENT_TEMPERATURE,
-        api_key=api_key,
+    if provider == "openai":
+        try:
+            from langchain_openai import ChatOpenAI
+        except ImportError as exc:
+            raise AgentConfigurationError(
+                "langchain-openai is required for OpenAI provider. "
+                "Install via `pip install langchain-openai`."
+            ) from exc
+
+        api_key = settings.OPENAI_API_KEY
+        if not api_key:
+            raise AgentConfigurationError(
+                "OPENAI_API_KEY is not configured. Set it in backend/.env before running agents."
+            )
+
+        return ChatOpenAI(
+            model=settings.AGENT_MODEL,
+            temperature=settings.AGENT_TEMPERATURE,
+            api_key=api_key,
+        )
+
+    raise AgentConfigurationError(
+        f"Unsupported LLM_PROVIDER '{provider}'. Use 'openai' or 'ollama'."
     )
 
 

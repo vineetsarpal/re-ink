@@ -26,8 +26,16 @@ class Settings(BaseSettings):
     LANDINGAI_PARSE_MODEL: str = "dpt-2-latest"
     LANDINGAI_EXTRACT_MODEL: str = "extract-latest"
 
+    # LLM Provider Configuration
+    # Supported values: "openai", "ollama"
+    LLM_PROVIDER: str = "openai"
+
     # OpenAI Configuration
-    OPENAI_API_KEY: str
+    OPENAI_API_KEY: str = ""
+
+    # Ollama Configuration
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "llama3.1"
 
     # Agent Configuration
     AGENT_OFFLINE_MODE: bool = False
