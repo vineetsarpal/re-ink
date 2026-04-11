@@ -428,7 +428,7 @@ class LandingAIService:
         if "cedant_name" in data and data["cedant_name"]:
             cedant = {
                 "name": data["cedant_name"],
-                "party_type": "cedent",
+                "party_type": "cedant",
                 "is_active": True
             }
             parties_data.append(cedant)

@@ -520,6 +520,15 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
             {!agentLoading && agentError && (
               <p className="agent-panel__error">{agentError}</p>
             )}
+            {!agentLoading && !agentError && !agentAnalysis?.analysis && agentAnalysis?.errors && agentAnalysis.errors.length > 0 && (
+              <div className="agent-panel__error">
+                {agentAnalysis.errors
+                  .filter((err) => !err.includes('validation failed'))
+                  .map((err, i) => (
+                    <p key={i}>{err}</p>
+                  ))}
+              </div>
+            )}
             {!agentLoading && !agentError && agentAnalysis?.analysis && (
               <div className="agent-panel__insights">
                 <p className="agent-panel__summary">{agentAnalysis.analysis.assistant_message}</p>
