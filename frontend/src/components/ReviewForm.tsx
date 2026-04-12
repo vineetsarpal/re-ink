@@ -184,15 +184,15 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
             const errorMessages: string[] = [];
 
             if (validationErrors.contract) {
-              const contractErrors = validationErrors.contract;
+              const contractErrors = validationErrors.contract as Record<string, { message?: string } | undefined>;
               Object.keys(contractErrors).forEach(field => {
-                errorMessages.push(`Contract ${field}: ${contractErrors[field as keyof typeof contractErrors]?.message || 'Required'}`);
+                errorMessages.push(`Contract ${field}: ${contractErrors[field]?.message || 'Required'}`);
               });
             }
 
             if (validationErrors.parties) {
-              const partiesErrors = validationErrors.parties;
-              (partiesErrors as Array<Record<string, { message?: string }>>).forEach((partyErrors, i) => {
+              const partiesErrors = validationErrors.parties as Array<Record<string, { message?: string }> | undefined>;
+              partiesErrors.forEach((partyErrors, i) => {
                 if (!partyErrors) return;
                 Object.keys(partyErrors).forEach(field => {
                   errorMessages.push(`Party ${i + 1} ${field}: ${partyErrors[field]?.message || 'Required'}`);

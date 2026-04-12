@@ -125,17 +125,18 @@ export const ContractDetailPage: React.FC = () => {
     field: keyof ContractWithParties,
     type: string = 'text',
     options?: Array<{ value: string; label: string }>
-  ) => {
+  ): React.ReactNode => {
     const value = getValue(field);
 
     if (!isEditing) {
+      if (Array.isArray(value)) return 'N/A';
       if (type === 'date' && value) {
         return formatDate(String(value));
       }
       if (type === 'number' && value) {
         return value.toString();
       }
-      return value || 'N/A';
+      return (value as string | number | boolean | null | undefined) || 'N/A';
     }
 
     if (type === 'select' && options) {

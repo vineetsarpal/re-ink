@@ -22,7 +22,7 @@ export const ExtractionStatus: React.FC<ExtractionStatusProps> = ({
   const [isPolling, setIsPolling] = useState(true);
 
   useEffect(() => {
-    let intervalId: NodeJS.Timeout;
+    let intervalId: ReturnType<typeof setInterval>;
 
     const pollStatus = async () => {
       try {
