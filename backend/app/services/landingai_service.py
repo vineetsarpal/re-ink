@@ -219,11 +219,7 @@ class LandingAIService:
             # The SDK returns a response object
             # We need to convert it to a dictionary for our processing
             if hasattr(extract_response, 'model_dump'):
-                # Pydantic model with model_dump method
                 result = extract_response.model_dump()
-            elif hasattr(extract_response, 'dict'):
-                # Pydantic v1 model with dict method
-                result = extract_response.dict()
             elif isinstance(extract_response, str):
                 # String response (likely JSON) - parse it
                 import json
