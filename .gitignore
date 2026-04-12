@@ -46,8 +46,6 @@ wheels/
 
 # Uploads
 uploads/
-*.pdf
-*.docx
 
 # Node / React
 node_modules/
