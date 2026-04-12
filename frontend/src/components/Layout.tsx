@@ -69,7 +69,7 @@ export const Layout: React.FC = () => {
         </ul>
 
         <div className="sidebar-footer">
-          <p className="version-info">Version 1.0.0</p>
+          <p className="version-info">Version {__APP_VERSION__}</p>
         </div>
       </nav>
 

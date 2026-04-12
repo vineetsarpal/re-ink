@@ -2,9 +2,26 @@
 Application configuration management.
 Loads settings from environment variables using pydantic-settings.
 """
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 from typing import List
+
+
+def _read_version() -> str:
+    """
+    Read version from VERSION file (backend/ or repo root).
+    Falls back to pyproject.toml, then 'dev'.
+    """
+    # Injected by CI deploy workflow into backend/
+    local = Path(__file__).parents[2] / "VERSION"
+    if local.exists():
+        return local.read_text().strip()
+    # Repo root (works in local dev when full repo is present)
+    root = Path(__file__).parents[3] / "VERSION"
+    if root.exists():
+        return root.read_text().strip()
+    return "dev"
 
 
 class Settings(BaseSettings):
@@ -12,7 +29,7 @@ class Settings(BaseSettings):
 
     # Application
     APP_NAME: str = "re-ink"
-    APP_VERSION: str = "1.0.0"
+    APP_VERSION: str = _read_version()
     DEBUG: bool = False
     SECRET_KEY: str
 

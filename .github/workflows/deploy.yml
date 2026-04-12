@@ -18,6 +18,9 @@ jobs:
 
       - uses: astral-sh/setup-uv@v5
 
+      - name: Inject VERSION into backend
+        run: cp VERSION backend/VERSION
+
       - name: Deploy
         run: uv run fastapi deploy
         working-directory: backend
