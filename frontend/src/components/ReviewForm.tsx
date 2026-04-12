@@ -184,16 +184,18 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
             const errorMessages: string[] = [];
 
             if (validationErrors.contract) {
-              Object.keys(validationErrors.contract).forEach(field => {
-                errorMessages.push(`Contract ${field}: ${validationErrors.contract[field]?.message || 'Required'}`);
+              const contractErrors = validationErrors.contract as Record<string, { message?: string } | undefined>;
+              Object.keys(contractErrors).forEach(field => {
+                errorMessages.push(`Contract ${field}: ${contractErrors[field]?.message || 'Required'}`);
               });
             }
 
             if (validationErrors.parties) {
-              Object.keys(validationErrors.parties).forEach(index => {
-                const partyErrors = validationErrors.parties[index];
+              const partiesErrors = validationErrors.parties as Array<Record<string, { message?: string }> | undefined>;
+              partiesErrors.forEach((partyErrors, i) => {
+                if (!partyErrors) return;
                 Object.keys(partyErrors).forEach(field => {
-                  errorMessages.push(`Party ${parseInt(index, 10) + 1} ${field}: ${partyErrors[field]?.message || 'Required'}`);
+                  errorMessages.push(`Party ${i + 1} ${field}: ${partyErrors[field]?.message || 'Required'}`);
                 });
               });
             }
@@ -278,11 +280,22 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
             </div>
 
             <div className="form-field">
-              <label htmlFor="premium_amount">Premium</label>
+              <label htmlFor="premium_description">Premium</label>
+              <input
+                id="premium_description"
+                {...register('contract.premium_description')}
+                disabled={!isEditing}
+                placeholder="e.g. 100% of gross premium"
+              />
+            </div>
+
+            <div className="form-field">
+              <label htmlFor="premium_amount">Premium Amount</label>
               <input
                 id="premium_amount"
                 {...register('contract.premium_amount')}
                 disabled={!isEditing}
+
               />
             </div>
 
@@ -297,7 +310,17 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
             </div>
 
             <div className="form-field">
-              <label htmlFor="limit_amount">Limit</label>
+              <label htmlFor="limit_description">Limit</label>
+              <input
+                id="limit_description"
+                {...register('contract.limit_description')}
+                disabled={!isEditing}
+                placeholder="e.g. 100% quota share"
+              />
+            </div>
+
+            <div className="form-field">
+              <label htmlFor="limit_amount">Limit Amount</label>
               <input
                 id="limit_amount"
                 {...register('contract.limit_amount')}
@@ -306,11 +329,31 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
             </div>
 
             <div className="form-field">
-              <label htmlFor="retention_amount">Retention/Deductible Amount</label>
+              <label htmlFor="retention_description">Retention/Deductible</label>
+              <input
+                id="retention_description"
+                {...register('contract.retention_description')}
+                disabled={!isEditing}
+                placeholder="e.g. $150,000,000 net of recoveries"
+              />
+            </div>
+
+            <div className="form-field">
+              <label htmlFor="retention_amount">Retention Amount</label>
               <input
                 id="retention_amount"
                 {...register('contract.retention_amount')}
                 disabled={!isEditing}
+              />
+            </div>
+
+            <div className="form-field">
+              <label htmlFor="commission_description">Commission</label>
+              <input
+                id="commission_description"
+                {...register('contract.commission_description')}
+                disabled={!isEditing}
+                placeholder="e.g. all expenses + 0.5% of net written premium"
               />
             </div>
 
@@ -475,6 +518,15 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
             {agentLoading && <p>Generating AI insights for this extraction…</p>}
             {!agentLoading && agentError && (
               <p className="agent-panel__error">{agentError}</p>
+            )}
+            {!agentLoading && !agentError && !agentAnalysis?.analysis && agentAnalysis?.errors && agentAnalysis.errors.length > 0 && (
+              <div className="agent-panel__error">
+                {agentAnalysis.errors
+                  .filter((err) => !err.includes('validation failed'))
+                  .map((err, i) => (
+                    <p key={i}>{err}</p>
+                  ))}
+              </div>
             )}
             {!agentLoading && !agentError && agentAnalysis?.analysis && (
               <div className="agent-panel__insights">

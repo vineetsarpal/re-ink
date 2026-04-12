@@ -65,7 +65,7 @@ Vite + React under `frontend/src/`:
 2. `GET /api/documents/status/{job_id}` — polled by `ExtractionStatus` until `completed`/`failed`
 3. `GET /api/documents/results/{job_id}` — returns parsed extraction data
 4. `POST /api/review/approve` — creates Contract + Party records from reviewed data
-5. `POST /api/agents/intake` / `POST /api/agents/review` — optional LangChain agent passes (requires `OPENAI_API_KEY`)
+5. `POST /api/agents/intake` / `POST /api/agents/review` — optional LangChain agent passes (requires `LLM_PROVIDER` config)
 
 ## Environment Variables
 
@@ -81,9 +81,12 @@ LANDINGAI_EXTRACT_MODEL=extract-latest
 UPLOAD_DIR=./uploads
 MAX_UPLOAD_SIZE=52428800
 ALLOWED_ORIGINS=["http://localhost:3000","http://localhost:5173"]
-OPENAI_API_KEY=your_openai_key    # Only needed for agent endpoints
-AGENT_MODEL=gpt-4o-mini
-AGENT_OFFLINE_MODE=false          # Set true to skip LLM calls locally
+LLM_PROVIDER=openai               # "openai" or "ollama"
+OPENAI_API_KEY=your_openai_key    # Only needed when LLM_PROVIDER=openai
+AGENT_MODEL=gpt-4o-mini           # Model name for OpenAI provider
+OLLAMA_BASE_URL=http://localhost:11434  # Only needed when LLM_PROVIDER=ollama
+OLLAMA_MODEL=llama3.1             # Model name for Ollama provider
+AGENT_OFFLINE_MODE=false          # Set true to skip LLM calls entirely
 ```
 
 ### Frontend (`frontend/.env`)

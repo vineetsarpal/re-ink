@@ -27,16 +27,23 @@ class LandingAIService:
     """
 
     def __init__(self):
-        self.api_key = settings.LANDINGAI_API_KEY
         self.parse_model = settings.LANDINGAI_PARSE_MODEL
         self.extract_model = settings.LANDINGAI_EXTRACT_MODEL
 
-        # Initialize the LandingAI ADE client
-        self.client = LandingAIADE(apikey=self.api_key)
+    def _get_client(self, api_key: Optional[str] = None) -> LandingAIADE:
+        """Return a LandingAIADE client using the provided key or the server default."""
+        key = api_key or settings.LANDINGAI_API_KEY
+        if not key:
+            raise ValueError(
+                "No LandingAI API key provided. "
+                "Supply your key in the upload form or set LANDINGAI_API_KEY in the server environment."
+            )
+        return LandingAIADE(apikey=key)
 
     async def submit_document_for_extraction(
         self,
         file_path: str,
+        api_key: Optional[str] = None,
         parse_model: Optional[str] = None,
         extract_model: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -62,11 +69,14 @@ class LandingAIService:
             Exception: If any API request fails
         """
         try:
+            client = self._get_client(api_key)
+
             # Step 1: Parse document to markdown
             logger.info(f"Starting document parsing for: {file_path}")
             parse_result = await self._parse_document(
                 file_path=file_path,
-                model=parse_model or self.parse_model
+                model=parse_model or self.parse_model,
+                client=client,
             )
 
             markdown = parse_result.get("markdown", "")
@@ -79,7 +89,8 @@ class LandingAIService:
             logger.info("Starting field extraction from parsed document")
             extract_result = await self._extract_fields(
                 markdown=markdown,
-                model=extract_model or self.extract_model
+                model=extract_model or self.extract_model,
+                client=client,
             )
 
             logger.info("Field extraction completed successfully")
@@ -104,6 +115,7 @@ class LandingAIService:
         self,
         file_path: str,
         model: str,
+        client: LandingAIADE,
     ) -> Dict[str, Any]:
         """
         Step 1: Parse document using LandingAI ADE SDK.
@@ -133,7 +145,7 @@ class LandingAIService:
             loop = asyncio.get_event_loop()
             parse_response = await loop.run_in_executor(
                 None,
-                lambda: self.client.parse(
+                lambda: client.parse(
                     document=file_path_obj,
                     model=model,
                 )
@@ -160,7 +172,8 @@ class LandingAIService:
     async def _extract_fields(
         self,
         markdown: str,
-        model: str
+        model: str,
+        client: LandingAIADE,
     ) -> Dict[str, Any]:
         """
         Step 2: Extract structured fields using LandingAI ADE SDK.
@@ -178,10 +191,15 @@ class LandingAIService:
         """
         try:
             # Get the extraction schema using the SDK's conversion function
+            # Returns a JSON string — the SDK extract method expects it as a string
             schema = pydantic_to_json_schema(ReinsuranceContractFieldExtractionSchema)
 
             logger.info(f"Extracting fields with model: {model}")
-            logger.debug(f"Schema keys: {list(schema.get('properties', {}).keys())}")
+            if isinstance(schema, str):
+                import json as _json
+                logger.debug(f"Schema keys: {list(_json.loads(schema).get('properties', {}).keys())}")
+            else:
+                logger.debug(f"Schema keys: {list(schema.get('properties', {}).keys())}")
 
             # Use the SDK's extract method
             # Convert markdown string to BytesIO for the SDK
@@ -191,7 +209,7 @@ class LandingAIService:
             loop = asyncio.get_event_loop()
             extract_response = await loop.run_in_executor(
                 None,
-                lambda: self.client.extract(
+                lambda: client.extract(
                     schema=schema,
                     markdown=markdown_bytes,
                     model=model,
@@ -201,11 +219,7 @@ class LandingAIService:
             # The SDK returns a response object
             # We need to convert it to a dictionary for our processing
             if hasattr(extract_response, 'model_dump'):
-                # Pydantic model with model_dump method
                 result = extract_response.model_dump()
-            elif hasattr(extract_response, 'dict'):
-                # Pydantic v1 model with dict method
-                result = extract_response.dict()
             elif isinstance(extract_response, str):
                 # String response (likely JSON) - parse it
                 import json
@@ -333,20 +347,30 @@ class LandingAIService:
             if date_field in data and data[date_field]:
                 contract_data[date_field] = self._normalize_date(data[date_field])
 
-        # Financial terms - map from new schema
+        # Financial terms — store raw text in *_description, parsed number in *_amount
+        if "premium_amount" in data and data["premium_amount"]:
+            contract_data["premium_description"] = data["premium_amount"]
+            contract_data["premium_amount"] = self._clean_numeric_value(data["premium_amount"])
+
+        if "commission_rate" in data and data["commission_rate"]:
+            contract_data["commission_description"] = data["commission_rate"]
+            contract_data["commission_rate"] = self._clean_numeric_value(data["commission_rate"])
+
         if "deductible_amount" in data and data["deductible_amount"]:
-            # Map deductible_amount to retention_amount
+            contract_data["retention_description"] = data["deductible_amount"]
             contract_data["retention_amount"] = self._clean_numeric_value(data["deductible_amount"])
 
         if "limit_covered" in data and data["limit_covered"]:
-            # Map limit_covered to limit_amount
+            contract_data["limit_description"] = data["limit_covered"]
             contract_data["limit_amount"] = self._clean_numeric_value(data["limit_covered"])
 
         if "upper_limit" in data and data["upper_limit"]:
-            # If we have upper_limit, it might override or supplement limit_amount
-            upper_limit_value = self._clean_numeric_value(data["upper_limit"])
+            upper_text = data["upper_limit"]
+            upper_value = self._clean_numeric_value(upper_text)
+            if "limit_description" not in contract_data:
+                contract_data["limit_description"] = upper_text
             if "limit_amount" not in contract_data:
-                contract_data["limit_amount"] = upper_limit_value
+                contract_data["limit_amount"] = upper_value
 
         # Coverage details
         if "attachment_criteria" in data and data["attachment_criteria"]:
@@ -400,7 +424,7 @@ class LandingAIService:
         if "cedant_name" in data and data["cedant_name"]:
             cedant = {
                 "name": data["cedant_name"],
-                "party_type": "cedent",
+                "party_type": "cedant",
                 "is_active": True
             }
             parties_data.append(cedant)
@@ -489,5 +513,4 @@ class LandingAIService:
         return None
 
 
-# Singleton instance
 landingai_service = LandingAIService()

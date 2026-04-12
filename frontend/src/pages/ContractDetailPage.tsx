@@ -125,17 +125,18 @@ export const ContractDetailPage: React.FC = () => {
     field: keyof ContractWithParties,
     type: string = 'text',
     options?: Array<{ value: string; label: string }>
-  ) => {
+  ): React.ReactNode => {
     const value = getValue(field);
 
     if (!isEditing) {
+      if (Array.isArray(value)) return 'N/A';
       if (type === 'date' && value) {
         return formatDate(String(value));
       }
       if (type === 'number' && value) {
         return value.toString();
       }
-      return value || 'N/A';
+      return (value as string | number | boolean | null | undefined) || 'N/A';
     }
 
     if (type === 'select' && options) {
@@ -510,6 +511,10 @@ export const ContractDetailPage: React.FC = () => {
           <h2><DollarSign size={20} /> Financial Details</h2>
           <div className="info-grid">
             <div className="info-item">
+              <label>Premium Description</label>
+              <span className="value">{renderField('premium_description')}</span>
+            </div>
+            <div className="info-item">
               <label>Premium Amount</label>
               <span className="value">
                 {isEditing ? renderField('premium_amount', 'number') : formatCurrency(contract.premium_amount, contract.currency)}
@@ -520,7 +525,11 @@ export const ContractDetailPage: React.FC = () => {
               <span className="value">{renderField('currency')}</span>
             </div>
             <div className="info-item">
-              <label>Limit</label>
+              <label>Limit Description</label>
+              <span className="value">{renderField('limit_description')}</span>
+            </div>
+            <div className="info-item">
+              <label>Limit Amount</label>
               <span className="value">
                 {isEditing
                   ? renderField('limit_amount')
@@ -528,10 +537,18 @@ export const ContractDetailPage: React.FC = () => {
               </span>
             </div>
             <div className="info-item">
+              <label>Retention Description</label>
+              <span className="value">{renderField('retention_description')}</span>
+            </div>
+            <div className="info-item">
               <label>Retention Amount</label>
               <span className="value">
                 {isEditing ? renderField('retention_amount', 'number') : formatCurrency(contract.retention_amount, contract.currency)}
               </span>
+            </div>
+            <div className="info-item">
+              <label>Commission Description</label>
+              <span className="value">{renderField('commission_description')}</span>
             </div>
             <div className="info-item">
               <label>Commission Rate (%)</label>

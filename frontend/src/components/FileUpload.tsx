@@ -3,9 +3,28 @@
  * Supports PDF and DOCX formats with drag-and-drop functionality.
  */
 import React, { useState, useCallback } from 'react';
-import { Upload, FileText, AlertCircle } from 'lucide-react';
+import { Upload, FileText, AlertCircle, KeyRound, FileDown } from 'lucide-react';
 import { documentApi } from '@/services/api';
 import type { DocumentUploadResponse } from '@/types';
+
+const SAMPLE_DOCUMENTS = [
+  {
+    name: '100% Quota Share Reinsurance Contract',
+    filename: 'quota-share-reinsurance-contract.pdf',
+    url: '/samples/quota-share-reinsurance-contract.pdf',
+    description: 'Vesta Fire Insurance Corp & Affirmative Insurance — proportional treaty, 4 pages',
+    pages: 4,
+    type: 'Quota Share',
+  },
+  {
+    name: 'Excess of Loss Reinsurance Agreement',
+    filename: 'excess-of-loss-reinsurance-agreement.pdf',
+    url: '/samples/excess-of-loss-reinsurance-agreement.pdf',
+    description: 'Republic Insurance & Winterthur Swiss — non-proportional XOL, 6 pages',
+    pages: 6,
+    type: 'XOL',
+  },
+];
 
 interface FileUploadProps {
   onUploadSuccess?: (response: DocumentUploadResponse) => void;
@@ -20,6 +39,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [apiKey, setApiKey] = useState('');
+  const [showKey, setShowKey] = useState(false);
 
   const allowedTypes = [
     'application/pdf',
@@ -75,6 +96,19 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     }
   };
 
+  const handleSampleSelect = async (sample: typeof SAMPLE_DOCUMENTS[number]) => {
+    setError(null);
+    try {
+      const response = await fetch(sample.url);
+      if (!response.ok) throw new Error('Failed to fetch sample document');
+      const blob = await response.blob();
+      const file = new File([blob], sample.filename, { type: 'application/pdf' });
+      setSelectedFile(file);
+    } catch {
+      setError('Failed to load sample document. Please try again.');
+    }
+  };
+
   const handleUpload = async () => {
     if (!selectedFile) return;
 
@@ -82,9 +116,10 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     setError(null);
 
     try {
-      const response = await documentApi.upload(selectedFile);
+      const response = await documentApi.upload(selectedFile, apiKey.trim() || undefined);
       onUploadSuccess?.(response);
       setSelectedFile(null);
+      setApiKey('');
     } catch (err: any) {
       const errorMessage = err.response?.data?.detail || 'Failed to upload file';
       setError(errorMessage);
@@ -96,6 +131,47 @@ export const FileUpload: React.FC<FileUploadProps> = ({
 
   return (
     <div className="file-upload-container">
+      {/* API Key input */}
+      <div className="api-key-section">
+        <label className="api-key-label" htmlFor="landingai-api-key">
+          <KeyRound size={16} />
+          LandingAI API Key
+        </label>
+        <div className="api-key-input-wrapper">
+          <input
+            id="landingai-api-key"
+            type={showKey ? 'text' : 'password'}
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="Enter your LandingAI API key"
+            className="api-key-input"
+            disabled={isUploading}
+            autoComplete="off"
+            data-1p-ignore
+            data-lpignore="true"
+            data-form-type="other"
+          />
+          <button
+            type="button"
+            className="api-key-toggle"
+            onClick={() => setShowKey((v) => !v)}
+            aria-label={showKey ? 'Hide API key' : 'Show API key'}
+          >
+            {showKey ? 'Hide' : 'Show'}
+          </button>
+        </div>
+        <p className="api-key-hint">
+          Your key is sent directly to the server for this request only and is never stored.{' '}
+          <a
+            href="https://docs.landing.ai/ade/agentic-api-key"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Get your LandingAI API key →
+          </a>
+        </p>
+      </div>
+
       <div
         className={`upload-dropzone ${isDragging ? 'dragging' : ''} ${
           selectedFile ? 'has-file' : ''
@@ -158,6 +234,28 @@ export const FileUpload: React.FC<FileUploadProps> = ({
           </>
         )}
       </div>
+
+      {!selectedFile && (
+        <div className="sample-documents">
+          <p className="sample-documents__label">Or try a sample document</p>
+          <div className="sample-documents__grid">
+            {SAMPLE_DOCUMENTS.map((sample) => (
+              <button
+                key={sample.filename}
+                className="sample-card"
+                onClick={() => handleSampleSelect(sample)}
+                disabled={isUploading}
+              >
+                <FileDown size={24} className="sample-card__icon" />
+                <div className="sample-card__content">
+                  <span className="sample-card__name">{sample.name}</span>
+                  <span className="sample-card__meta">{sample.description}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

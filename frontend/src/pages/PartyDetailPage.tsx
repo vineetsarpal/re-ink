@@ -4,7 +4,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Building2, Mail, Phone, MapPin, FileText, Calendar, Edit2, Save, X, Trash2 } from 'lucide-react';
+import { ArrowLeft, Building2, Mail, MapPin, FileText, Calendar, Edit2, Save, X, Trash2 } from 'lucide-react';
 import { partyApi } from '@/services/api';
 import type { Party } from '@/types';
 

@@ -1,12 +1,13 @@
 """
 API endpoints for document upload and extraction workflow.
 """
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from datetime import datetime
 import logging
 
+from app.core.config import settings
 from app.db.database import get_db
 from app.schemas.document import (
     DocumentUploadResponse,
@@ -17,6 +18,7 @@ from app.schemas.document import (
 )
 from app.services.document_service import document_service
 from app.services.landingai_service import landingai_service
+from app.services.extraction_store import extraction_store
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -29,6 +31,7 @@ extraction_jobs: Dict[str, Dict[str, Any]] = {}
 async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    api_key: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     """
@@ -37,9 +40,17 @@ async def upload_document(
     This endpoint:
     1. Validates the uploaded file
     2. Saves it to disk
-    3. Initiates extraction job with LandingAI
+    3. Initiates extraction job with LandingAI (using provided or server API key)
     4. Returns job ID for status tracking
     """
+    # Resolve which key to use — user-supplied takes priority over server default
+    resolved_key = api_key or settings.LANDINGAI_API_KEY
+    if not resolved_key:
+        raise HTTPException(
+            status_code=400,
+            detail="A LandingAI API key is required. Please enter your key in the upload form."
+        )
+
     try:
         # Save the uploaded file
         file_info = await document_service.save_uploaded_file(file)
@@ -48,17 +59,20 @@ async def upload_document(
         background_tasks.add_task(
             process_document_extraction,
             file_info["file_path"],
-            file_info["job_id"]
+            file_info["job_id"],
+            resolved_key,
         )
 
         # Store initial job status
-        extraction_jobs[file_info["job_id"]] = {
+        initial_payload = {
             "status": "processing",
             "filename": file_info["filename"],
             "file_path": file_info["file_path"],
             "message": "Document uploaded and extraction started",
             "created_at": datetime.utcnow()
         }
+        extraction_jobs[file_info["job_id"]] = initial_payload
+        extraction_store.create_job(file_info["job_id"], dict(initial_payload))
 
         return DocumentUploadResponse(
             job_id=file_info["job_id"],
@@ -75,10 +89,10 @@ async def upload_document(
         raise HTTPException(status_code=500, detail="Error uploading document")
 
 
-async def process_document_extraction(file_path: str, job_id: str):
+async def process_document_extraction(file_path: str, job_id: str, api_key: str):
     """
     Background task to process document extraction via LandingAI ADE Parse API.
-    
+
     ADE Parse is synchronous and returns results immediately, but processing
     can take time, so we run it in a background task.
     """
@@ -91,7 +105,9 @@ async def process_document_extraction(file_path: str, job_id: str):
 
         # Parse document using LandingAI ADE Parse API
         # This is synchronous but may take time for large documents
-        raw_results = await landingai_service.submit_document_for_extraction(file_path)
+        raw_results = await landingai_service.submit_document_for_extraction(
+            file_path, api_key=api_key
+        )
         
         # Parse the results to extract contract and party data
         parsed_results = landingai_service.parse_extraction_results(raw_results)
@@ -100,25 +116,29 @@ async def process_document_extraction(file_path: str, job_id: str):
         job_id_from_api = raw_results.get("metadata", {}).get("job_id")
         
         # Update job status with results
-        extraction_jobs[job_id].update({
+        completed_update = {
             "status": "completed",
             "message": "Extraction completed successfully",
             "landingai_job_id": job_id_from_api,
-            "raw_results": raw_results,  # Store raw results for reference
-            "parsed_results": parsed_results,  # Store parsed results
+            "raw_results": raw_results,
+            "parsed_results": parsed_results,
             "completed_at": datetime.utcnow()
-        })
+        }
+        extraction_jobs[job_id].update(completed_update)
+        extraction_store.update_job(job_id, completed_update)
         
         logger.info(f"Document extraction completed for job {job_id}")
 
     except Exception as e:
         logger.error(f"Error processing document extraction: {str(e)}", exc_info=True)
-        extraction_jobs[job_id].update({
+        failed_update = {
             "status": "failed",
             "message": f"Extraction failed: {str(e)}",
             "error": str(e),
             "failed_at": datetime.utcnow()
-        })
+        }
+        extraction_jobs[job_id].update(failed_update)
+        extraction_store.update_job(job_id, failed_update)
 
 
 @router.get("/status/{job_id}", response_model=DocumentExtractionStatus)
