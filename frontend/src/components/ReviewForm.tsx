@@ -184,16 +184,18 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
             const errorMessages: string[] = [];
 
             if (validationErrors.contract) {
-              Object.keys(validationErrors.contract).forEach(field => {
-                errorMessages.push(`Contract ${field}: ${validationErrors.contract[field]?.message || 'Required'}`);
+              const contractErrors = validationErrors.contract;
+              Object.keys(contractErrors).forEach(field => {
+                errorMessages.push(`Contract ${field}: ${contractErrors[field as keyof typeof contractErrors]?.message || 'Required'}`);
               });
             }
 
             if (validationErrors.parties) {
-              Object.keys(validationErrors.parties).forEach(index => {
-                const partyErrors = validationErrors.parties[index];
+              const partiesErrors = validationErrors.parties;
+              (partiesErrors as Array<Record<string, { message?: string }>>).forEach((partyErrors, i) => {
+                if (!partyErrors) return;
                 Object.keys(partyErrors).forEach(field => {
-                  errorMessages.push(`Party ${parseInt(index, 10) + 1} ${field}: ${partyErrors[field]?.message || 'Required'}`);
+                  errorMessages.push(`Party ${i + 1} ${field}: ${partyErrors[field]?.message || 'Required'}`);
                 });
               });
             }
@@ -293,7 +295,7 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
                 id="premium_amount"
                 {...register('contract.premium_amount')}
                 disabled={!isEditing}
-                placeholder="Numeric value if applicable"
+
               />
             </div>
 
@@ -323,7 +325,6 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
                 id="limit_amount"
                 {...register('contract.limit_amount')}
                 disabled={!isEditing}
-                placeholder="Numeric value if applicable"
               />
             </div>
 
@@ -343,7 +344,6 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
                 id="retention_amount"
                 {...register('contract.retention_amount')}
                 disabled={!isEditing}
-                placeholder="Numeric value if applicable"
               />
             </div>
 
@@ -363,7 +363,6 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
                 id="commission_rate"
                 {...register('contract.commission_rate')}
                 disabled={!isEditing}
-                placeholder="Numeric value if applicable"
               />
             </div>
 
