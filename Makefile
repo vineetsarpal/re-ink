@@ -3,9 +3,9 @@ SHELL := /bin/bash
 BACKEND_DIR := backend
 FRONTEND_DIR := frontend
 
-.PHONY: setup backend-install backend-dev frontend-install frontend-dev dev
+.PHONY: setup backend-install backend-dev frontend-install frontend-dev dev sync-version bump-version
 
-setup: backend-install frontend-install ## Install backend and frontend dependencies
+setup: backend-install frontend-install sync-version ## Install backend + frontend dependencies
 
 backend-install: ## Install backend Python dependencies via uv
 	cd $(BACKEND_DIR) && uv sync --group dev

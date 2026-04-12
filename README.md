@@ -26,10 +26,9 @@ re-ink is a full-stack web application that streamlines reinsurance contract man
 
 ## Sample Documents
 
-- Browse curated sample files in `sample_documents/` to exercise the ingestion workflow end to end.
-- Documents are sourced from public SEC EDGAR filings (https://www.sec.gov/edgar/search/) and trimmed to the excerpts needed for development and QA.
-- To upload a sample through the app, remove the `.example` suffix (or convert back to a standard PDF/DOCX) so the file matches the expected format.
-- When committing binary samples, rename them with `.pdf.example` or `.docx.example` suffixes so they bypass the `.gitignore` filters while preserving their original format.
+Two sample PDFs are bundled with the frontend and available directly in the Upload page UI — just click a sample card to load it, no setup required.
+
+For additional manual upload testing, `sample_documents/` contains trimmed SEC EDGAR filings. Files use `.pdf.example` / `.docx.example` suffixes to bypass `.gitignore`; remove the `.example` suffix before uploading through the app. When committing new samples, add the suffix back.
 
 ## Technology Stack
 
@@ -76,21 +75,16 @@ re-ink is a full-stack web application that streamlines reinsurance contract man
                 │  workflow)│      │ - Contract Review │
                 └────┬──────┘      └────┬──────────────┘
                      │                  │
-      ┌──────────────▼──────────┐       │
-      │ Extraction Job Store    │       │
-      │ (status + parsed data)  │       │
-      └──────────────┬──────────┘       │
-                     │                  │
         ┌────────────▼────────┐         │
         │ LandingAI ADE API   │         │
         │ Parse & Extract     │         │
         └────────────┬────────┘         │
                      │                  │
-        ┌────────────▼────────┐         │            ┌─────────────────┐
-        │ PostgreSQL          │◄────────┼────────────┤ LangChain LLM   │
-        │ Contracts & Parties │         │  prompts   │  (OpenAI, etc.) │
-        └─────────────────────┘         │            └─────────────────┘
-                                        │
+        ┌────────────▼────────────────┐ │            ┌─────────────────┐
+        │ PostgreSQL                  │◄┼────────────┤ LangChain LLM   │
+        │ - Contracts & Parties       │ │  prompts   │  (OpenAI, Ollama│
+        │ - Extraction Jobs           │ │            │   or offline)   │
+        └─────────────────────────────┘ │            └─────────────────┘
                                         │
                             (insights returned to frontend)
 
@@ -114,7 +108,7 @@ cp frontend/.env.example frontend/.env
 make dev
 ```
 
-Use `make backend-dev` or `make frontend-dev` if you want to run either side individually, and `make backend-install` / `make frontend-install` to refresh dependencies.
+Use `make backend-dev` or `make frontend-dev` to run either side individually, and `make backend-install` / `make frontend-install` to refresh dependencies. `make sync-version` copies the root `VERSION` file into `backend/` (included automatically in `make setup`).
 
 ### Prerequisites
 
@@ -174,26 +168,28 @@ Frontend will be available at http://localhost:3000
 
 ```
 re-ink/
-├── backend/              # FastAPI backend
+├── VERSION                   # Single source of truth for app version
+├── backend/                  # FastAPI backend
 │   ├── app/
-│   │   ├── api/         # API endpoints
-│   │   ├── core/        # Configuration
-│   │   ├── db/          # Database setup
-│   │   ├── models/      # Database models
-│   │   ├── schemas/     # Pydantic schemas
-│   │   ├── services/    # Business logic
-│   │   └── main.py      # Application entry
-│   ├── alembic/         # Database migrations
-│   └── requirements.txt
-├── frontend/            # React frontend
+│   │   ├── api/             # API endpoints
+│   │   ├── core/            # Configuration (reads VERSION file)
+│   │   ├── db/              # Database setup
+│   │   ├── models/          # SQLAlchemy models (Contract, Party, ExtractionJob)
+│   │   ├── schemas/         # Pydantic schemas
+│   │   ├── services/        # Business logic
+│   │   └── main.py          # Application entry
+│   └── pyproject.toml
+├── frontend/                 # React frontend
+│   ├── public/
+│   │   └── samples/         # Bundled sample PDFs (selectable in UI)
 │   ├── src/
-│   │   ├── components/  # React components
-│   │   ├── pages/       # Page components
-│   │   ├── services/    # API client
-│   │   ├── types/       # TypeScript types
-│   │   └── styles/      # CSS styles
+│   │   ├── components/      # React components
+│   │   ├── pages/           # Page components
+│   │   ├── services/        # API client
+│   │   ├── types/           # TypeScript types
+│   │   └── styles/          # CSS styles
 │   └── package.json
-└── README.md
+└── sample_documents/         # Extra SEC EDGAR samples for manual upload testing
 ```
 
 ## Workflow
@@ -251,31 +247,30 @@ re-ink/
 
 ### Backend (.env)
 ```env
-APP_NAME=re-ink
-APP_VERSION=1.0.0
-DEBUG=false
 SECRET_KEY=your_secret_key
 DATABASE_URL=postgresql://user:password@localhost:5432/reink_db
-LANDINGAI_API_KEY=your_landingai_api_key
+LANDINGAI_API_KEY=your_landingai_api_key   # Optional — users can supply their own key in the UI (BYOK)
 LANDINGAI_PARSE_URL=https://api.va.landing.ai/v1/ade/parse
 LANDINGAI_EXTRACT_URL=https://api.va.landing.ai/v1/ade/extract
 LANDINGAI_PARSE_MODEL=dpt-2-latest
 LANDINGAI_EXTRACT_MODEL=extract-latest
 MAX_UPLOAD_SIZE=52428800
 UPLOAD_DIR=./uploads
-ALLOWED_EXTENSIONS=.pdf,.docx
 ALLOWED_ORIGINS=["http://localhost:3000","http://localhost:5173"]
-ACCESS_TOKEN_EXPIRE_MINUTES=30
 LOG_LEVEL=INFO
-OPENAI_API_KEY=your_openai_key
+LLM_PROVIDER=openai               # "openai" or "ollama"
+OPENAI_API_KEY=your_openai_key    # Only needed when LLM_PROVIDER=openai
 AGENT_MODEL=gpt-4o-mini
 AGENT_TEMPERATURE=0.1
-AGENT_OFFLINE_MODE=false
+AGENT_OFFLINE_MODE=false          # Set true to skip LLM calls entirely
+OLLAMA_BASE_URL=http://localhost:11434  # Only needed when LLM_PROVIDER=ollama
+OLLAMA_MODEL=llama3.1
 ```
 
-- `OPENAI_API_KEY` is only needed when LangChain/LangGraph agents should call OpenAI; set `AGENT_OFFLINE_MODE=true` to bypass those calls locally.
-- `ALLOWED_ORIGINS` supports JSON array notation (shown above) or a comma-separated list.
-- Adjust `MAX_UPLOAD_SIZE`, `ALLOWED_EXTENSIONS`, and `UPLOAD_DIR` if you need to support additional file formats.
+- `LANDINGAI_API_KEY` is optional on the server — users can enter their own key directly in the Upload UI (BYOK). If neither is set, the upload will be rejected with a clear error.
+- `LLM_PROVIDER` selects the agent LLM backend; set `AGENT_OFFLINE_MODE=true` to skip LLM calls entirely.
+- `ALLOWED_ORIGINS` supports JSON array notation (shown above) or a comma-separated list. In production, set this to your deployed frontend URL.
+- The app version is read from the `VERSION` file at the repo root — do not set `APP_VERSION` in `.env`.
 
 ### Frontend (.env)
 ```env
