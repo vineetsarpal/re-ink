@@ -17,7 +17,7 @@ re-ink is a full-stack web application that streamlines reinsurance contract man
 - 🤖 **AI Extraction**: Automatic extraction of contract terms and parties using LandingAI
 - ✅ **Review Workflow**: Review and edit AI-extracted data before creating records
 - 📊 **Contract Management**: Full CRUD operations for reinsurance contracts
-- 👥 **Party Management**: Manage parties (cedents, reinsurers, brokers)
+- 👥 **Party Management**: Manage parties (cedants, reinsurers, brokers)
 - 🔍 **Search & Filter**: Find contracts and parties quickly
 - 📈 **Dashboard**: Overview of contracts and parties with statistics
 - 🧪 **Sample Extraction Mode**: Seed mock data to test the workflow without LandingAI
@@ -28,7 +28,6 @@ re-ink is a full-stack web application that streamlines reinsurance contract man
 
 Two sample PDFs are bundled with the frontend and available directly in the Upload page UI — just click a sample card to load it, no setup required.
 
-For additional manual upload testing, `sample_documents/` contains trimmed SEC EDGAR filings. Files use `.pdf.example` / `.docx.example` suffixes to bypass `.gitignore`; remove the `.example` suffix before uploading through the app. When committing new samples, add the suffix back.
 
 ## Technology Stack
 
@@ -189,7 +188,7 @@ re-ink/
 │   │   ├── types/           # TypeScript types
 │   │   └── styles/          # CSS styles
 │   └── package.json
-└── sample_documents/         # Extra SEC EDGAR samples for manual upload testing
+
 ```
 
 ## Workflow
@@ -218,7 +217,7 @@ re-ink/
 - `DELETE /api/contracts/{id}/parties/{party_id}` - Remove a party association from a contract
 
 ### Parties
-- `GET /api/parties/` - List parties (supports `party_type`, `is_active`, `skip`, `limit`)
+- `GET /api/parties/` - List parties (supports `is_active`, `skip`, `limit`)
 - `POST /api/parties/` - Create a party
 - `GET /api/parties/{id}` - Get party details
 - `PUT /api/parties/{id}` - Update party fields

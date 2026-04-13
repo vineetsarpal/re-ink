@@ -7,14 +7,15 @@ from typing import List, Optional
 import logging
 
 from app.db.database import get_db
-from app.models.contract import Contract
+from app.models.contract import Contract, contract_parties
 from app.models.party import Party
 from app.schemas.contract import (
     ContractCreate,
     ContractUpdate,
     ContractResponse,
-    ContractWithParties
+    ContractWithParties,
 )
+from app.schemas.party import PartyWithRoleResponse
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -46,17 +47,25 @@ def create_contract(
         # Create contract
         contract_dict = contract_data.model_dump(exclude={"party_roles"})
         contract = Contract(**contract_dict)
+        db.add(contract)
+        db.flush()  # need contract.id for association inserts
 
-        # Add parties if provided
+        # Add parties if provided — write the per-contract role directly so it
+        # lands on the association row rather than being dropped.
         if contract_data.party_roles:
             for party_role in contract_data.party_roles:
                 party = db.query(Party).filter(Party.id == party_role.party_id).first()
-                if party:
-                    contract.parties.append(party)
-                else:
+                if not party:
                     logger.warning(f"Party with ID {party_role.party_id} not found")
+                    continue
+                db.execute(
+                    contract_parties.insert().values(
+                        contract_id=contract.id,
+                        party_id=party.id,
+                        role=party_role.role,
+                    )
+                )
 
-        db.add(contract)
         db.commit()
         db.refresh(contract)
 
@@ -105,6 +114,10 @@ def list_contracts(
 def get_contract(contract_id: int, db: Session = Depends(get_db)):
     """
     Get a specific contract by ID, including associated parties.
+
+    Each party carries the role it plays on *this* contract, which is read
+    from the ``contract_parties`` association table (not from the Party row,
+    since the same party can play different roles on different contracts).
     """
     try:
         contract = db.query(Contract).filter(Contract.id == contract_id).first()
@@ -112,7 +125,22 @@ def get_contract(contract_id: int, db: Session = Depends(get_db)):
         if not contract:
             raise HTTPException(status_code=404, detail="Contract not found")
 
-        return contract
+        # Fetch (party_id -> role) from the association table in one query.
+        role_rows = db.execute(
+            contract_parties.select().where(contract_parties.c.contract_id == contract_id)
+        ).fetchall()
+        role_by_party_id = {row.party_id: row.role for row in role_rows}
+
+        # Hydrate a ContractWithParties dict manually so each party gets its role.
+        contract_payload = ContractWithParties.model_validate(contract, from_attributes=True)
+        contract_payload.parties = [
+            PartyWithRoleResponse(
+                **PartyWithRoleResponse.model_validate(p, from_attributes=True).model_dump(exclude={"role"}),
+                role=role_by_party_id.get(p.id),
+            )
+            for p in contract.parties
+        ]
+        return contract_payload
 
     except HTTPException:
         raise
@@ -207,7 +235,13 @@ def add_party_to_contract(
                 detail="Party already associated with this contract"
             )
 
-        contract.parties.append(party)
+        db.execute(
+            contract_parties.insert().values(
+                contract_id=contract.id,
+                party_id=party.id,
+                role=role,
+            )
+        )
         db.commit()
 
         return {"message": "Party added to contract successfully"}
@@ -218,6 +252,35 @@ def add_party_to_contract(
         db.rollback()
         logger.error(f"Error adding party to contract: {str(e)}")
         raise HTTPException(status_code=500, detail="Error adding party to contract")
+
+
+@router.patch("/{contract_id}/parties/{party_id}")
+def update_party_role(
+    contract_id: int,
+    party_id: int,
+    role: str = Query(..., description="New role for the party on this contract"),
+    db: Session = Depends(get_db)
+):
+    """
+    Update the role of a party on a specific contract.
+    """
+    try:
+        result = db.execute(
+            contract_parties.update()
+            .where(contract_parties.c.contract_id == contract_id)
+            .where(contract_parties.c.party_id == party_id)
+            .values(role=role)
+        )
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Party not associated with this contract")
+        db.commit()
+        return {"message": "Party role updated successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating party role: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error updating party role")
 
 
 @router.delete("/{contract_id}/parties/{party_id}")

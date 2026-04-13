@@ -3,7 +3,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Filter } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { partyApi } from '@/services/api';
 import type { Party } from '@/types';
 
@@ -12,18 +12,15 @@ export const PartiesPage: React.FC = () => {
   const [parties, setParties] = useState<Party[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [typeFilter, setTypeFilter] = useState<string>('');
 
   useEffect(() => {
     loadParties();
-  }, [typeFilter]);
+  }, []);
 
   const loadParties = async () => {
     setIsLoading(true);
     try {
-      const data = await partyApi.getAll({
-        party_type: typeFilter || undefined,
-      });
+      const data = await partyApi.getAll();
       setParties(data);
     } catch (err) {
       console.error('Error loading parties:', err);
@@ -58,19 +55,6 @@ export const PartiesPage: React.FC = () => {
           />
         </div>
 
-        <div className="filter-group">
-          <Filter size={20} />
-          <select
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
-          >
-            <option value="">All Types</option>
-            <option value="cedant">Cedant</option>
-            <option value="reinsurer">Reinsurer</option>
-            <option value="broker">Broker</option>
-            <option value="other">Other</option>
-          </select>
-        </div>
       </div>
 
       {/* Parties Grid */}
@@ -89,11 +73,6 @@ export const PartiesPage: React.FC = () => {
               onClick={() => navigate(`/parties/${party.id}`)}
             >
               <h3>{party.name}</h3>
-              <p className="party-type">
-                <span className={`type-badge type-${party.party_type}`}>
-                  {party.party_type}
-                </span>
-              </p>
 
               <div className="party-details">
                 {party.email && (

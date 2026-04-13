@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from .contract import ContractCreate
-from .party import PartyCreate
+from .party import PartyCreate, PartyAction
 
 
 class DocumentUploadResponse(BaseModel):
@@ -37,8 +37,7 @@ class DocumentExtractionStatus(BaseModel):
 class ReviewData(BaseModel):
     """Schema for reviewing and confirming extracted data."""
     contract: ContractCreate
-    parties: List[PartyCreate]
-    create_new_parties: bool = True  # Whether to create parties that don't exist
+    parties: List[PartyAction]  # Per-party: link to existing or create new
 
 
 class ReviewApprovalResponse(BaseModel):

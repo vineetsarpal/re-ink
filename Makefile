@@ -3,7 +3,7 @@ SHELL := /bin/bash
 BACKEND_DIR := backend
 FRONTEND_DIR := frontend
 
-.PHONY: setup backend-install backend-dev frontend-install frontend-dev dev sync-version bump-version
+.PHONY: setup backend-install backend-dev frontend-install frontend-dev dev sync-version bump-version seed-parties
 
 setup: backend-install frontend-install sync-version ## Install backend + frontend dependencies
 
@@ -28,6 +28,9 @@ bump-version: ## Set a new version: make bump-version V=1.2.3
 	@cp VERSION backend/VERSION
 	@cd frontend && npm version $(V) --no-git-tag-version --allow-same-version > /dev/null
 	@echo "Version set to $(V)"
+
+seed-parties: ## Seed the parties table with reinsurance market participants
+	cd $(BACKEND_DIR) && uv run python scripts/seed_parties.py
 
 dev: ## Run backend and frontend dev servers concurrently
 	@echo "Launching backend and frontend dev servers..."

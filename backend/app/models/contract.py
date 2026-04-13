@@ -16,7 +16,7 @@ contract_parties = Table(
     Base.metadata,
     Column('contract_id', Integer, ForeignKey('contracts.id'), primary_key=True),
     Column('party_id', Integer, ForeignKey('parties.id'), primary_key=True),
-    Column('role', String(50)),  # Role of party in this contract (e.g., "cedent", "reinsurer")
+    Column('role', String(50)),  # Role of party in this contract (e.g., "cedant", "reinsurer")
     Column('created_at', DateTime(timezone=True), server_default=func.now())
 )
 

@@ -208,35 +208,110 @@ async def seed_mock_job(
 ):
     """
     Seed a mock extraction job for testing (skips LandingAI).
+
+    Rotates through several realistic scenarios based on sample
+    reinsurance documents. Each call generates a unique contract number
+    so the flow can be repeated without duplicate-contract errors.
     """
     import uuid
+    import random
+
     job_id = (payload or {}).get("job_id") or str(uuid.uuid4())
+    suffix = job_id[:6].upper()
 
     existing = db.query(ExtractionJob).filter(ExtractionJob.job_id == job_id).first()
     if existing:
         db.delete(existing)
         db.commit()
 
-    mock_parsed = {
-        "contract_data": {
-            "contract_number": "RC-2024-MOCK-001",
-            "contract_name": "Mock Quota Share Treaty",
-            "contract_type": "quota share",
-            "effective_date": "2024-01-01",
-            "expiration_date": "2024-12-31",
+    scenarios = [
+        {
+            "contract_data": {
+                "contract_number": f"QS-2024-{suffix}",
+                "contract_name": "100% Quota Share Reinsurance Contract",
+                "contract_type": "quota share",
+                "contract_sub_type": "quota_share",
+                "contract_nature": "proportional",
+                "effective_date": "2024-07-01",
+                "expiration_date": "2025-06-30",
+                "premium_description": "100% of gross written premium",
+                "currency": "USD",
+                "limit_description": "100% quota share",
+                "line_of_business": "property",
+                "coverage_territory": "United States",
+                "coverage_description": "All property risks per original policy terms",
+            },
+            "parties_data": [
+                {"name": "Vesta Fire Insurance Corp", "role": "cedant", "is_active": True},
+                {"name": "Affirmative Insurance Company", "role": "reinsurer", "is_active": True},
+            ],
+            "confidence_score": 0.91,
+            "extraction_metadata": {"filename": "quota-share-reinsurance-contract.pdf", "page_count": 4},
         },
-        "parties_data": [
-            {"name": "Mock Cedent Co", "party_type": "cedent"},
-            {"name": "Mock Reinsurer Ltd", "party_type": "reinsurer"},
-        ],
-        "confidence_score": 0.95,
-        "extraction_metadata": {"filename": "mock.pdf", "page_count": 2},
-    }
+        {
+            "contract_data": {
+                "contract_number": f"XOL-2024-{suffix}",
+                "contract_name": "Excess of Loss Reinsurance Agreement",
+                "contract_type": "excess of loss",
+                "contract_sub_type": "per_occurrence",
+                "contract_nature": "non-proportional",
+                "effective_date": "2024-01-01",
+                "expiration_date": "2024-12-31",
+                "premium_description": "Rate on line 8.5%",
+                "premium_amount": "850000.00",
+                "currency": "USD",
+                "limit_description": "$10,000,000 excess of $5,000,000",
+                "limit_amount": "10000000.00",
+                "retention_description": "$5,000,000 each and every loss occurrence",
+                "retention_amount": "5000000.00",
+                "line_of_business": "casualty",
+                "coverage_territory": "Worldwide",
+                "coverage_description": "Excess of loss coverage for catastrophe events",
+            },
+            "parties_data": [
+                {"name": "Republic Insurance Company", "role": "cedant", "is_active": True},
+                {"name": "Winterthur Swiss Insurance", "role": "reinsurer", "is_active": True},
+            ],
+            "confidence_score": 0.88,
+            "extraction_metadata": {"filename": "excess-of-loss-reinsurance-agreement.pdf", "page_count": 6},
+        },
+        {
+            "contract_data": {
+                "contract_number": f"SP-2025-{suffix}",
+                "contract_name": "First Surplus Treaty Reinsurance Contract",
+                "contract_type": "surplus",
+                "contract_sub_type": "first_surplus",
+                "contract_nature": "proportional",
+                "effective_date": "2025-01-01",
+                "expiration_date": "2025-12-31",
+                "premium_description": "Pro-rata share of original premium",
+                "currency": "USD",
+                "limit_description": "4 lines surplus, maximum $20,000,000",
+                "limit_amount": "20000000.00",
+                "retention_description": "$5,000,000 net retention per risk",
+                "retention_amount": "5000000.00",
+                "commission_description": "30% ceding commission",
+                "commission_rate": "30.00",
+                "line_of_business": "property",
+                "coverage_territory": "United States and Canada",
+                "coverage_description": "Commercial property and inland marine risks",
+            },
+            "parties_data": [
+                {"name": "National Union Fire Insurance", "role": "cedant", "is_active": True},
+                {"name": "Swiss Reinsurance Company Ltd", "role": "reinsurer", "is_active": True},
+                {"name": "Aon Benfield Securities", "role": "broker", "is_active": True},
+            ],
+            "confidence_score": 0.94,
+            "extraction_metadata": {"filename": "first-surplus-treaty.pdf", "page_count": 8},
+        },
+    ]
+
+    mock_parsed = random.choice(scenarios)
 
     job = ExtractionJob(
         job_id=job_id,
         status="completed",
-        filename="mock.pdf",
+        filename=mock_parsed["extraction_metadata"]["filename"],
         file_path="",
         message="Mock extraction completed",
         parsed_results=mock_parsed,
@@ -282,7 +357,7 @@ async def get_mock_extraction_data():
         "parties_data": [
             {
                 "name": "ABC Insurance Company",
-                "party_type": "cedent",
+                "role": "cedant",
                 "email": "contact@abcinsurance.com",
                 "phone": "+1-555-0100",
                 "address_line1": "123 Main Street",
@@ -293,7 +368,7 @@ async def get_mock_extraction_data():
             },
             {
                 "name": "XYZ Reinsurance Ltd",
-                "party_type": "reinsurer",
+                "role": "reinsurer",
                 "email": "info@xyzre.com",
                 "address_line1": "456 Financial District",
                 "city": "London",

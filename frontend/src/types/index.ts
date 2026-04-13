@@ -5,7 +5,6 @@
 export interface Party {
   id: number;
   name: string;
-  party_type: string;
   email?: string;
   phone?: string;
   address_line1?: string;
@@ -59,8 +58,17 @@ export interface Contract {
   updated_at?: string;
 }
 
+/**
+ * A party as it appears on a specific contract — same fields as Party plus
+ * the role it plays *on that contract*. Role lives on the contract_parties
+ * association on the backend, not on the Party row.
+ */
+export interface PartyWithRole extends Party {
+  role?: string | null;
+}
+
 export interface ContractWithParties extends Contract {
-  parties: Party[];
+  parties: PartyWithRole[];
 }
 
 export interface DocumentUploadResponse {
@@ -86,10 +94,27 @@ export interface DocumentExtractionStatus {
   created_at: string;
 }
 
+export interface PartyMatchCandidate {
+  party_id: number;
+  party_name: string;
+  score: number;
+}
+
+export interface PartyMatchResult {
+  extracted_name: string;
+  candidates: PartyMatchCandidate[];
+}
+
+export interface PartyAction {
+  action: 'use_existing' | 'create_new';
+  role?: string | null;
+  existing_party_id?: number;
+  party_data?: Omit<Party, 'id' | 'created_at' | 'updated_at'> & { is_active?: boolean };
+}
+
 export interface ReviewData {
   contract: Omit<Contract, 'id' | 'created_at' | 'updated_at'>;
-  parties: Omit<Party, 'id' | 'created_at' | 'updated_at'>[];
-  create_new_parties: boolean;
+  parties: PartyAction[];
 }
 
 export interface ReviewApprovalResponse {

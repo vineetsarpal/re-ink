@@ -7,7 +7,7 @@ FastAPI backend for the re-ink reinsurance contract management system.
 - **Document Processing**: Upload and process PDF/DOCX contract documents
 - **AI Extraction**: Integration with LandingAI's Agentic Document Extraction API
 - **Contract Management**: Full CRUD operations for reinsurance contracts
-- **Party Management**: Manage parties (cedents, reinsurers, brokers)
+- **Party Management**: Manage parties (cedants, reinsurers, brokers)
 - **Review Workflow**: Review and approve AI-extracted data before creation
 
 ## Setup

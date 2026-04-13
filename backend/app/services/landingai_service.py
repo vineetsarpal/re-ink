@@ -424,8 +424,8 @@ class LandingAIService:
         if "cedant_name" in data and data["cedant_name"]:
             cedant = {
                 "name": data["cedant_name"],
-                "party_type": "cedant",
-                "is_active": True
+                "role": "cedant",  # Role on *this* contract; not a property of the party
+                "is_active": True,
             }
             parties_data.append(cedant)
             logger.info(f"Processed cedant: {cedant['name']}")
@@ -434,8 +434,8 @@ class LandingAIService:
         if "reinsurer_name" in data and data["reinsurer_name"]:
             reinsurer = {
                 "name": data["reinsurer_name"],
-                "party_type": "reinsurer",
-                "is_active": True
+                "role": "reinsurer",  # Role on *this* contract
+                "is_active": True,
             }
             parties_data.append(reinsurer)
             logger.info(f"Processed reinsurer: {reinsurer['name']}")

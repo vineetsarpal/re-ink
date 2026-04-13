@@ -10,7 +10,9 @@ from app.db.database import Base
 class Party(Base):
     """
     Party entity representing an individual or organization involved in reinsurance.
-    Can be a cedent, reinsurer, broker, or other party type.
+    A Party's role (cedant, reinsurer, broker, etc.) is *per contract* and lives on
+    the ``contract_parties`` association table, not here — the same party can act as
+    a cedant on one contract and a reinsurer on another.
     """
     __tablename__ = "parties"
 
@@ -18,7 +20,6 @@ class Party(Base):
 
     # Basic Information
     name = Column(String(255), nullable=False, index=True)
-    party_type = Column(String(50), nullable=False)  # cedent, reinsurer, broker, etc.
 
     # Contact Information
     email = Column(String(255), index=True)
@@ -46,4 +47,4 @@ class Party(Base):
     # This will be defined in contract model
 
     def __repr__(self):
-        return f"<Party(id={self.id}, name='{self.name}', type='{self.party_type}')>"
+        return f"<Party(id={self.id}, name='{self.name}')>"

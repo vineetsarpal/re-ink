@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 import logging
 
 from app.db.database import get_db
-from app.models.contract import Contract
+from app.models.contract import Contract, contract_parties
 from app.models.party import Party
 from app.schemas.document import ReviewData, ReviewApprovalResponse
 
@@ -53,49 +53,35 @@ def approve_extracted_data(
             )
 
         party_ids = []
+        party_roles: list[str | None] = []  # Role to record on contract_parties per party
         party_status = []  # Track which parties are new vs existing
 
-        # Process parties
-        for party_data in review_data.parties:
-            # Check if party already exists by registration number or name
-            existing_party = None
-
-            if party_data.registration_number:
-                existing_party = db.query(Party).filter(
-                    Party.registration_number == party_data.registration_number
-                ).first()
-
-            if not existing_party and party_data.email:
-                existing_party = db.query(Party).filter(
-                    Party.email == party_data.email
-                ).first()
-
-            if existing_party:
-                # Use existing party
-                logger.info(f"Using existing party: {existing_party.name}")
+        # Process parties — each entry specifies "use_existing" or "create_new"
+        for party_action in review_data.parties:
+            if party_action.action == "use_existing":
+                if not party_action.existing_party_id:
+                    raise HTTPException(status_code=400, detail="existing_party_id required for use_existing action")
+                existing_party = db.query(Party).filter(Party.id == party_action.existing_party_id).first()
+                if not existing_party:
+                    raise HTTPException(status_code=404, detail=f"Party with ID {party_action.existing_party_id} not found")
+                logger.info(f"Using existing party: {existing_party.name} (role: {party_action.role})")
                 party_ids.append(existing_party.id)
-                party_status.append({
-                    "id": existing_party.id,
-                    "name": existing_party.name,
-                    "status": "existing"
-                })
-            elif review_data.create_new_parties:
-                # Create new party
-                new_party = Party(**party_data.model_dump())
+                party_roles.append(party_action.role)
+                party_status.append({"id": existing_party.id, "name": existing_party.name, "status": "existing"})
+
+            elif party_action.action == "create_new":
+                if not party_action.party_data:
+                    raise HTTPException(status_code=400, detail="party_data required for create_new action")
+                new_party = Party(**party_action.party_data.model_dump())
                 db.add(new_party)
-                db.flush()  # Flush to get the ID without committing
+                db.flush()
+                logger.info(f"Created new party: {new_party.name} (role: {party_action.role})")
                 party_ids.append(new_party.id)
-                logger.info(f"Created new party: {new_party.name}")
-                party_status.append({
-                    "id": new_party.id,
-                    "name": new_party.name,
-                    "status": "created"
-                })
+                party_roles.append(party_action.role)
+                party_status.append({"id": new_party.id, "name": new_party.name, "status": "created"})
+
             else:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Party {party_data.name} does not exist and create_new_parties is False"
-                )
+                raise HTTPException(status_code=400, detail=f"Unknown party action: {party_action.action}")
 
         # Create contract
         contract_dict = review_data.contract.model_dump(exclude={"party_roles"})
@@ -121,11 +107,17 @@ def approve_extracted_data(
         db.add(contract)
         db.flush()
 
-        # Associate parties with contract
-        for i, party_id in enumerate(party_ids):
-            party = db.query(Party).filter(Party.id == party_id).first()
-            if party:
-                contract.parties.append(party)
+        # Associate parties with contract — write directly to the association
+        # table so the per-contract ``role`` column is populated. Using
+        # ``contract.parties.append(party)`` would leave ``role`` as NULL.
+        for party_id, role in zip(party_ids, party_roles):
+            db.execute(
+                contract_parties.insert().values(
+                    contract_id=contract.id,
+                    party_id=party_id,
+                    role=role,
+                )
+            )
 
         # Commit all changes
         db.commit()

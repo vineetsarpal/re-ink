@@ -6,9 +6,14 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
 
+from rapidfuzz import fuzz, process as rfprocess
+
 from app.db.database import get_db
 from app.models.party import Party
-from app.schemas.party import PartyCreate, PartyUpdate, PartyResponse
+from app.schemas.party import (
+    PartyCreate, PartyUpdate, PartyResponse,
+    PartyMatchRequest, PartyMatchResult, PartyMatchCandidate,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -20,7 +25,7 @@ def create_party(
     db: Session = Depends(get_db)
 ):
     """
-    Create a new party (cedent, reinsurer, broker, etc.).
+    Create a new party (cedant, reinsurer, broker, etc.).
     """
     try:
         # Check if party with same registration number already exists
@@ -56,19 +61,19 @@ def create_party(
 def list_parties(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
-    party_type: Optional[str] = None,
     is_active: Optional[bool] = None,
     db: Session = Depends(get_db)
 ):
     """
     List all parties with optional filtering and pagination.
+
+    Note: there is no ``party_type`` filter — a party's role is per-contract
+    and lives on the ``contract_parties`` association table.
     """
     try:
         query = db.query(Party)
 
         # Apply filters
-        if party_type:
-            query = query.filter(Party.party_type == party_type)
         if is_active is not None:
             query = query.filter(Party.is_active == is_active)
 
@@ -80,6 +85,45 @@ def list_parties(
     except Exception as e:
         logger.error(f"Error listing parties: {str(e)}")
         raise HTTPException(status_code=500, detail="Error retrieving parties")
+
+
+@router.post("/match", response_model=List[PartyMatchResult])
+def match_parties(
+    request: PartyMatchRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Fuzzy-match a list of extracted party names against existing parties.
+    Returns ranked candidates per name scored by rapidfuzz token_sort_ratio.
+    """
+    all_parties = db.query(Party).filter(Party.is_active == True).all()  # noqa: E712
+
+    if not all_parties:
+        return [PartyMatchResult(extracted_name=n, candidates=[]) for n in request.names]
+
+    party_names = [p.name for p in all_parties]
+    party_by_name: dict[str, Party] = {p.name: p for p in all_parties}
+
+    results: list[PartyMatchResult] = []
+    for extracted_name in request.names:
+        matches = rfprocess.extract(
+            extracted_name,
+            party_names,
+            scorer=fuzz.token_sort_ratio,
+            limit=5,
+            score_cutoff=request.threshold,
+        )
+        candidates = [
+            PartyMatchCandidate(
+                party_id=party_by_name[name].id,
+                party_name=name,
+                score=round(score, 1),
+            )
+            for name, score, _idx in matches
+        ]
+        results.append(PartyMatchResult(extracted_name=extracted_name, candidates=candidates))
+
+    return results
 
 
 @router.get("/{party_id}", response_model=PartyResponse)

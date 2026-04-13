@@ -96,13 +96,14 @@ class ContractResponse(ContractBase):
 
 
 class ContractWithParties(ContractResponse):
-    """Contract response with associated parties included."""
-    parties: List["PartyResponse"] = []
+    """Contract response with associated parties included. Each party carries the
+    role it plays on *this* contract, which is stored on the association table."""
+    parties: List["PartyWithRoleResponse"] = []
 
     class Config:
         from_attributes = True
 
 
-# Import PartyResponse for type hints
-from .party import PartyResponse
+# Import PartyWithRoleResponse for type hints
+from .party import PartyResponse, PartyWithRoleResponse  # noqa: F401
 ContractWithParties.model_rebuild()

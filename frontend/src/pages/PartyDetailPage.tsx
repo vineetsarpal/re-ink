@@ -198,9 +198,6 @@ export const PartyDetailPage: React.FC = () => {
           <div className="header-content">
             <h1>{party.name}</h1>
             <div className="badges">
-              <span className={`badge badge-${party.party_type}`}>
-                {party.party_type}
-              </span>
               {party.is_active ? (
                 <span className="badge badge-active">Active</span>
               ) : (
@@ -257,17 +254,6 @@ export const PartyDetailPage: React.FC = () => {
             <div className="info-item">
               <label>Name</label>
               <span className="value">{renderField('name')}</span>
-            </div>
-            <div className="info-item">
-              <label>Party Type</label>
-              <span className="value capitalize">
-                {renderField('party_type', 'select', [
-                  { value: 'cedant', label: 'Cedant' },
-                  { value: 'reinsurer', label: 'Reinsurer' },
-                  { value: 'broker', label: 'Broker' },
-                  { value: 'other', label: 'Other' },
-                ])}
-              </span>
             </div>
             <div className="info-item">
               <label>Registration Number</label>

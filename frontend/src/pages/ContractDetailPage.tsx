@@ -51,6 +51,18 @@ export const ContractDetailPage: React.FC = () => {
     },
   });
 
+  // Update party role mutation
+  const updatePartyRoleMutation = useMutation({
+    mutationFn: ({ partyId, role }: { partyId: number; role: string }) =>
+      contractApi.updatePartyRole(Number(id), partyId, role),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['contract', id] });
+    },
+    onError: (error: any) => {
+      alert(`Failed to update role: ${error.response?.data?.detail || error.message}`);
+    },
+  });
+
   // Delete mutation
   const deleteMutation = useMutation({
     mutationFn: () => contractApi.delete(Number(id)),
@@ -586,33 +598,50 @@ export const ContractDetailPage: React.FC = () => {
           {contract.parties && contract.parties.length > 0 ? (
             <div className="parties-list">
               {contract.parties.map((party) => (
-                <Link
-                  key={party.id}
-                  to={`/parties/${party.id}`}
-                  className="party-card-link"
-                >
+                <div key={party.id} className="party-card-link">
                   <div className="party-card">
                     <div className="party-header">
-                      <h4>{party.name}</h4>
-                      <span className={`badge badge-${party.party_type}`}>
-                        {party.party_type}
-                      </span>
+                      <Link to={`/parties/${party.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+                        <h4>{party.name}</h4>
+                      </Link>
+                      {isEditing ? (
+                        <select
+                          defaultValue={party.role || 'cedant'}
+                          onChange={(e) => {
+                            updatePartyRoleMutation.mutate({ partyId: party.id, role: e.target.value });
+                          }}
+                          style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem', borderRadius: '0.25rem', border: '1px solid var(--border-color)' }}
+                        >
+                          <option value="cedant">Cedant</option>
+                          <option value="reinsurer">Reinsurer</option>
+                          <option value="broker">Broker</option>
+                          <option value="other">Other</option>
+                        </select>
+                      ) : (
+                        party.role && (
+                          <span className={`badge badge-${party.role}`}>
+                            {party.role}
+                          </span>
+                        )
+                      )}
                     </div>
-                    <div className="party-info">
-                      {party.email && (
-                        <span className="info-line">📧 {party.email}</span>
-                      )}
-                      {party.phone && (
-                        <span className="info-line">📞 {party.phone}</span>
-                      )}
-                      {party.city && party.country && (
-                        <span className="info-line">
-                          📍 {party.city}, {party.country}
-                        </span>
-                      )}
-                    </div>
+                    <Link to={`/parties/${party.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+                      <div className="party-info">
+                        {party.email && (
+                          <span className="info-line">📧 {party.email}</span>
+                        )}
+                        {party.phone && (
+                          <span className="info-line">📞 {party.phone}</span>
+                        )}
+                        {party.city && party.country && (
+                          <span className="info-line">
+                            📍 {party.city}, {party.country}
+                          </span>
+                        )}
+                      </div>
+                    </Link>
                   </div>
-                </Link>
+                </div>
               ))}
             </div>
           ) : (

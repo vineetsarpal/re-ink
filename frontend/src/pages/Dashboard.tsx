@@ -194,7 +194,6 @@ export const Dashboard: React.FC = () => {
                 onClick={() => navigate(`/parties/${party.id}`)}
               >
                 <h3>{party.name}</h3>
-                <p className="party-type">{party.party_type}</p>
                 {party.email && <p className="party-email">{party.email}</p>}
                 {party.country && <p className="party-location">{party.country}</p>}
               </div>

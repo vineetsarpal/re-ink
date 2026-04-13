@@ -6,6 +6,7 @@ import type {
   Contract,
   ContractWithParties,
   Party,
+  PartyMatchResult,
   DocumentUploadResponse,
   DocumentExtractionStatus,
   ExtractionResult,
@@ -178,6 +179,13 @@ export const contractApi = {
   },
 
   /**
+   * Update the role of a party on a contract.
+   */
+  updatePartyRole: async (contractId: number, partyId: number, role: string): Promise<void> => {
+    await api.patch(`/contracts/${contractId}/parties/${partyId}?role=${encodeURIComponent(role)}`);
+  },
+
+  /**
    * Remove a party from a contract.
    */
   removeParty: async (contractId: number, partyId: number): Promise<void> => {
@@ -193,7 +201,6 @@ export const partyApi = {
   getAll: async (params?: {
     skip?: number;
     limit?: number;
-    party_type?: string;
     is_active?: boolean;
   }): Promise<Party[]> => {
     const response = await api.get<Party[]>('/parties/', { params });
@@ -214,6 +221,17 @@ export const partyApi = {
   searchByName: async (name: string): Promise<Party[]> => {
     const response = await api.get<Party[]>('/parties/search/by-name', {
       params: { name },
+    });
+    return response.data;
+  },
+
+  /**
+   * Fuzzy-match extracted party names against existing parties.
+   */
+  matchByName: async (names: string[], threshold?: number): Promise<PartyMatchResult[]> => {
+    const response = await api.post<PartyMatchResult[]>('/parties/match', {
+      names,
+      threshold: threshold ?? 60,
     });
     return response.data;
   },

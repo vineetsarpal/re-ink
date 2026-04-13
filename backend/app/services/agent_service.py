@@ -24,6 +24,7 @@ from app.schemas.agent import (
 )
 from app.schemas.contract import ContractCreate, ContractWithParties
 from app.schemas.document import ReviewData
+from app.schemas.party import PartyAction
 from app.schemas.party import PartyCreate
 from app.db.database import SessionLocal
 from app.models.extraction_job import ExtractionJob
@@ -213,17 +214,27 @@ class AgentService:
             errors.append(f"Contract data validation failed: {exc}")
             return None, errors
 
-        party_models = []
+        party_actions = []
         for idx, party_dict in enumerate(parties_data):
             try:
-                party_models.append(PartyCreate(**party_dict))
+                # The extractor emits ``role`` (cedant / reinsurer / …) as the
+                # *per-contract* role suggestion. That belongs on PartyAction,
+                # not on the Party itself, so strip it before building PartyCreate.
+                party_payload = {k: v for k, v in party_dict.items() if k != "role"}
+                party_create = PartyCreate(**party_payload)
+                party_actions.append(
+                    PartyAction(
+                        action="create_new",
+                        role=party_dict.get("role"),
+                        party_data=party_create,
+                    )
+                )
             except ValidationError as exc:
                 errors.append(f"Party #{idx + 1} validation failed: {exc}")
 
         review_payload = ReviewData(
             contract=contract,
-            parties=party_models,
-            create_new_parties=True,
+            parties=party_actions,
         )
         return review_payload, errors
 
@@ -540,7 +551,7 @@ class AgentService:
             "Ensure regulatory reporting requirements are updated after approval.",
         ]
         if not parties:
-            recommended_actions.insert(0, "Associate cedent and reinsurer parties before execution.")
+            recommended_actions.insert(0, "Associate cedant and reinsurer parties before execution.")
 
         compliance_notes = [
             "Offline mode: review financial limits and commissions manually.",
