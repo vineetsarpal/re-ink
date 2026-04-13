@@ -101,8 +101,6 @@ VITE_API_BASE_URL=http://localhost:8000/api
 
 Two sample PDFs are bundled with the frontend at `frontend/public/samples/` and are selectable directly in the Upload page UI — no setup needed.
 
-`sample_documents/` contains additional trimmed SEC EDGAR filings for manual upload testing. Files use `.pdf.example` / `.docx.example` suffixes to bypass `.gitignore`; remove the `.example` suffix before uploading through the app. When committing new samples, add the suffix back.
-
 ## Version Management
 
 The root `VERSION` file is the single source of truth for the app version.

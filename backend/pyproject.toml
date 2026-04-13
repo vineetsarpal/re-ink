@@ -29,6 +29,8 @@ dependencies = [
     "langchain-openai",
     "langchain-ollama",
     "langgraph",
+    # Fuzzy matching for party deduplication
+    "rapidfuzz>=3.0.0",
     # Auth & security
     "python-jose[cryptography]==3.3.0",
     "passlib[bcrypt]==1.7.4",

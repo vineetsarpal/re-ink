@@ -18,7 +18,7 @@ export const HomePage: React.FC = () => {
             <span>AI-Powered Contract Management</span>
           </div>
           <h1 className="hero-title">
-            <span className="gradient-text">Re-Ink</span>
+            <span className="gradient-text">Re-ink</span>
             <br />
             Intelligent Reinsurance
           </h1>

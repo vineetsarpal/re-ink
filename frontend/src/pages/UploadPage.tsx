@@ -196,6 +196,8 @@ export const UploadPage: React.FC = () => {
               onUploadError={(error) => alert(error)}
             />
             {isOfflineMode && (
+              <>
+                <p className="sample-documents__label" style={{ marginTop: '2.5rem', textAlign: 'center' }}>Or use a sample extraction</p>
               <div className="mock-upload">
                 <p className="mock-upload__description">
                   Seed a fully-populated mock extraction to exercise
@@ -210,6 +212,7 @@ export const UploadPage: React.FC = () => {
                   {isSeedingMock ? 'Seeding Mock Extraction...' : 'Use Sample Extraction'}
                 </button>
               </div>
+              </>
             )}
           </>
         )}
