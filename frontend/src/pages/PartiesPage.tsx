@@ -3,7 +3,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search } from 'lucide-react';
+import { Search, Mail, Phone, MapPin, Hash } from 'lucide-react';
 import { partyApi } from '@/services/api';
 import type { Party } from '@/types';
 
@@ -72,38 +72,45 @@ export const PartiesPage: React.FC = () => {
               className="party-card clickable"
               onClick={() => navigate(`/parties/${party.id}`)}
             >
-              <h3>{party.name}</h3>
-
-              <div className="party-details">
-                {party.email && (
-                  <p className="detail-row">
-                    <strong>Email:</strong> {party.email}
-                  </p>
-                )}
-                {party.phone && (
-                  <p className="detail-row">
-                    <strong>Phone:</strong> {party.phone}
-                  </p>
-                )}
-                {party.country && (
-                  <p className="detail-row">
-                    <strong>Country:</strong> {party.country}
-                  </p>
-                )}
-                {party.registration_number && (
-                  <p className="detail-row">
-                    <strong>Reg #:</strong> {party.registration_number}
-                  </p>
-                )}
+              <div className="party-card__top">
+                <h3 className="party-card__name">{party.name}</h3>
+                <span
+                  className={`party-card__status ${
+                    party.is_active ? 'is-active' : 'is-inactive'
+                  }`}
+                  title={party.is_active ? 'Active' : 'Inactive'}
+                >
+                  <span className="party-card__status-dot" />
+                  {party.is_active ? 'Active' : 'Inactive'}
+                </span>
               </div>
 
-              <p className="party-status">
-                {party.is_active ? (
-                  <span className="status-active">Active</span>
-                ) : (
-                  <span className="status-inactive">Inactive</span>
+              <ul className="party-card__meta">
+                {party.email && (
+                  <li>
+                    <Mail size={14} />
+                    <span>{party.email}</span>
+                  </li>
                 )}
-              </p>
+                {party.phone && (
+                  <li>
+                    <Phone size={14} />
+                    <span>{party.phone}</span>
+                  </li>
+                )}
+                {party.country && (
+                  <li>
+                    <MapPin size={14} />
+                    <span>{party.country}</span>
+                  </li>
+                )}
+                {party.registration_number && (
+                  <li>
+                    <Hash size={14} />
+                    <span>{party.registration_number}</span>
+                  </li>
+                )}
+              </ul>
             </div>
           ))}
         </div>
