@@ -1002,6 +1002,10 @@ tbody tr:last-child td {
   transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
 }
 
+.review-form .party-card + .party-card {
+  margin-top: 1.25rem;
+}
+
 .party-card.clickable {
   cursor: pointer;
 }

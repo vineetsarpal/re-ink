@@ -6,14 +6,13 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
 
-from rapidfuzz import fuzz, process as rfprocess
-
 from app.db.database import get_db
 from app.models.party import Party
 from app.schemas.party import (
     PartyCreate, PartyUpdate, PartyResponse,
     PartyMatchRequest, PartyMatchResult, PartyMatchCandidate,
 )
+from app.services.party_matching import match_names
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -94,34 +93,39 @@ def match_parties(
 ):
     """
     Fuzzy-match a list of extracted party names against existing parties.
-    Returns ranked candidates per name scored by rapidfuzz token_sort_ratio.
+
+    Matching is delegated to ``services.party_matching`` which normalizes
+    corporate suffixes/case, splits list-of-companies strings, and scores
+    with rapidfuzz WRatio. See that module for the full rationale.
     """
     all_parties = db.query(Party).filter(Party.is_active == True).all()  # noqa: E712
 
     if not all_parties:
         return [PartyMatchResult(extracted_name=n, candidates=[]) for n in request.names]
 
-    party_names = [p.name for p in all_parties]
     party_by_name: dict[str, Party] = {p.name: p for p in all_parties}
+    ranked = match_names(
+        request.names,
+        party_by_name.keys(),
+        threshold=request.threshold,
+        limit=5,
+    )
 
     results: list[PartyMatchResult] = []
-    for extracted_name in request.names:
-        matches = rfprocess.extract(
-            extracted_name,
-            party_names,
-            scorer=fuzz.token_sort_ratio,
-            limit=5,
-            score_cutoff=request.threshold,
-        )
-        candidates = [
-            PartyMatchCandidate(
-                party_id=party_by_name[name].id,
-                party_name=name,
-                score=round(score, 1),
+    for extracted_name, candidates in zip(request.names, ranked):
+        results.append(
+            PartyMatchResult(
+                extracted_name=extracted_name,
+                candidates=[
+                    PartyMatchCandidate(
+                        party_id=party_by_name[name].id,
+                        party_name=name,
+                        score=score,
+                    )
+                    for name, score in candidates
+                ],
             )
-            for name, score, _idx in matches
-        ]
-        results.append(PartyMatchResult(extracted_name=extracted_name, candidates=candidates))
+        )
 
     return results
 

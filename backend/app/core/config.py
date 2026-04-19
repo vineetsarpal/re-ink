@@ -7,7 +7,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 from typing import List
 
-
 def _read_version() -> str:
     """
     Read version from VERSION file (backend/ or repo root).

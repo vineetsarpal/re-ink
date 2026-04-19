@@ -296,104 +296,79 @@ class LandingAIService:
 
     def _process_contract_data(self, extract_result: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Process extracted contract data from the new schema format.
+        Map the Extract API response onto Contract DB columns.
 
-        Args:
-            extract_result: Raw extraction result from Extract API
-
-        Returns:
-            Dictionary with processed contract fields mapped to our database schema
+        The extraction schema (see extraction_schema.py) exposes a 1:1 shape with
+        the DB model: raw `*_text` fields map to `*_description` columns and
+        numeric `*_amount` / `*_rate` fields map directly. Dates arrive as ISO
+        strings thanks to the `date` type hint; we still pass them through
+        _normalize_date defensively.
         """
-        contract_data = {}
+        contract_data: Dict[str, Any] = {}
 
-        logger.info(f"Processing contract data. Available keys: {list(extract_result.keys()) if extract_result else 'None'}")
-
-        # Map the extracted fields to our database schema
-        # The extraction result may have the data directly or nested under a key
+        # Some SDKs wrap the payload; unwrap once if present.
         data = extract_result
-
-        # Check if data is nested (some SDKs wrap the response)
         if "data" in extract_result:
             data = extract_result["data"]
         elif "extraction" in extract_result:
             data = extract_result["extraction"]
 
-        # Contract identification - map extracted fields to our database fields
-        # Use contract_name from extraction
-        if "contract_name" in data:
+        logger.info(
+            f"Processing contract data. Available keys: {list(data.keys()) if data else 'None'}"
+        )
+
+        # Identification
+        if data.get("contract_name"):
             contract_data["contract_name"] = data["contract_name"]
 
-        # Use contract_number if available, otherwise generate from contract_name
-        if "contract_number" in data and data["contract_number"]:
+        if data.get("contract_number"):
             contract_data["contract_number"] = data["contract_number"]
-        elif "contract_name" in data:
-            # Generate a contract number from the name if not provided
+        elif data.get("contract_name"):
             import re
-            contract_data["contract_number"] = re.sub(r'[^a-zA-Z0-9]', '-', data["contract_name"])[:50]
+            contract_data["contract_number"] = re.sub(
+                r"[^a-zA-Z0-9]", "-", data["contract_name"]
+            )[:50]
 
-        # Map contract_type and contract_nature
-        if "contract_type" in data:
-            contract_data["contract_type"] = data["contract_type"]
-
-        if "contract_nature" in data:
-            # Append nature to type if both exist
-            if "contract_type" in contract_data:
-                contract_data["contract_type"] = f"{contract_data['contract_type']} - {data['contract_nature']}"
-            else:
-                contract_data["contract_type"] = data["contract_nature"]
-
-        # Date fields
-        for date_field in ["effective_date", "expiration_date"]:
-            if date_field in data and data[date_field]:
-                contract_data[date_field] = self._normalize_date(data[date_field])
-
-        # Financial terms — store raw text in *_description, parsed number in *_amount
-        if "premium_amount" in data and data["premium_amount"]:
-            contract_data["premium_description"] = data["premium_amount"]
-            contract_data["premium_amount"] = self._clean_numeric_value(data["premium_amount"])
-
-        if "commission_rate" in data and data["commission_rate"]:
-            contract_data["commission_description"] = data["commission_rate"]
-            contract_data["commission_rate"] = self._clean_numeric_value(data["commission_rate"])
-
-        if "deductible_amount" in data and data["deductible_amount"]:
-            contract_data["retention_description"] = data["deductible_amount"]
-            contract_data["retention_amount"] = self._clean_numeric_value(data["deductible_amount"])
-
-        if "limit_covered" in data and data["limit_covered"]:
-            contract_data["limit_description"] = data["limit_covered"]
-            contract_data["limit_amount"] = self._clean_numeric_value(data["limit_covered"])
-
-        if "upper_limit" in data and data["upper_limit"]:
-            upper_text = data["upper_limit"]
-            upper_value = self._clean_numeric_value(upper_text)
-            if "limit_description" not in contract_data:
-                contract_data["limit_description"] = upper_text
-            if "limit_amount" not in contract_data:
-                contract_data["limit_amount"] = upper_value
-
-        # Coverage details
-        if "attachment_criteria" in data and data["attachment_criteria"]:
-            contract_data["coverage_description"] = data["attachment_criteria"]
-
-        # Optional fields that match directly
-        optional_fields = [
-            "line_of_business", "coverage_territory", "terms_and_conditions", "special_provisions"
-        ]
-        for field in optional_fields:
-            if field in data and data[field]:
+        for field in ("contract_type", "contract_sub_type", "contract_nature"):
+            if data.get(field):
                 contract_data[field] = data[field]
 
-        # Currency
-        if "currency" in data and data["currency"]:
-            currency = data["currency"].upper()
+        # Period
+        for date_field in ("effective_date", "expiration_date"):
+            if data.get(date_field):
+                contract_data[date_field] = self._normalize_date(str(data[date_field]))
+
+        # Currency (default USD, validate ISO 4217 length)
+        if data.get("currency"):
+            currency = str(data["currency"]).upper().strip()
             if len(currency) == 3:
                 contract_data["currency"] = currency
-        else:
-            contract_data["currency"] = "USD"  # Default
+        contract_data.setdefault("currency", "USD")
 
-        # Log warning if no contract data was extracted
-        if not contract_data or len(contract_data) <= 1:
+        # Financial terms — text/amount pairs map to description/amount columns
+        for text_key, amount_key, desc_col, amount_col in (
+            ("premium_text",    "premium_amount",    "premium_description",    "premium_amount"),
+            ("retention_text",  "retention_amount",  "retention_description",  "retention_amount"),
+            ("limit_text",      "limit_amount",      "limit_description",      "limit_amount"),
+            ("commission_text", "commission_rate",   "commission_description", "commission_rate"),
+        ):
+            if data.get(text_key):
+                contract_data[desc_col] = data[text_key]
+            if data.get(amount_key) is not None:
+                contract_data[amount_col] = self._clean_numeric_value(data[amount_key])
+
+        # Coverage & terms
+        for field in (
+            "line_of_business",
+            "coverage_territory",
+            "coverage_description",
+            "terms_and_conditions",
+            "special_provisions",
+        ):
+            if data.get(field):
+                contract_data[field] = data[field]
+
+        if len(contract_data) <= 1:
             logger.warning("No contract data was extracted from the document!")
             logger.warning(f"Extract result had keys: {list(data.keys()) if data else 'Empty'}")
 

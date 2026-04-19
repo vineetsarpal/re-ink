@@ -61,7 +61,7 @@ class PartyResponse(PartyBase):
 class PartyMatchRequest(BaseModel):
     """Request to find fuzzy matches for extracted party names."""
     names: List[str]
-    threshold: float = 60.0  # minimum score (0-100) to include
+    threshold: float = 70.0  # minimum score (0-100) to include
 
 
 class PartyMatchCandidate(BaseModel):

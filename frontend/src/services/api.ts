@@ -231,7 +231,7 @@ export const partyApi = {
   matchByName: async (names: string[], threshold?: number): Promise<PartyMatchResult[]> => {
     const response = await api.post<PartyMatchResult[]>('/parties/match', {
       names,
-      threshold: threshold ?? 60,
+      threshold: threshold ?? 70,
     });
     return response.data;
   },
