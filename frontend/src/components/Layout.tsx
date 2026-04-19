@@ -1,19 +1,72 @@
 /**
  * Layout component with navigation and header.
+ *
+ * Sidebar is a fixed column on desktop and an off-canvas drawer on mobile.
+ * The drawer is toggled by a hamburger button in the mobile top bar, and
+ * auto-closes whenever the route changes so navigation doesn't leave it open.
  */
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useLocation, Outlet } from 'react-router-dom';
-import { FileText, Upload, Users, LayoutDashboard } from 'lucide-react';
+import { FileText, Upload, Users, LayoutDashboard, Menu, X } from 'lucide-react';
 
 export const Layout: React.FC = () => {
   const location = useLocation();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const isActive = (path: string) => location.pathname === path;
 
+  // Close the drawer whenever the route changes.
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
+
+  // Prevent background scroll while the drawer is open on mobile.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [mobileOpen]);
+
   return (
-    <div className="app-layout">
+    <div className={`app-layout ${mobileOpen ? 'app-layout--drawer-open' : ''}`}>
+      {/* Mobile top bar — visible only on narrow screens via CSS. */}
+      <header className="mobile-topbar">
+        <button
+          type="button"
+          className="mobile-topbar__menu-btn"
+          aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'}
+          aria-expanded={mobileOpen}
+          aria-controls="primary-sidebar"
+          onClick={() => setMobileOpen((o) => !o)}
+        >
+          {mobileOpen ? <X size={22} /> : <Menu size={22} />}
+        </button>
+        <Link to="/" className="mobile-topbar__brand">
+          <div className="mobile-topbar__logo">
+            <FileText size={18} strokeWidth={2.5} />
+          </div>
+          <span>Re-ink</span>
+        </Link>
+      </header>
+
+      {/* Scrim — only rendered while drawer is open so it captures taps. */}
+      {mobileOpen && (
+        <div
+          className="sidebar-scrim"
+          onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       {/* Sidebar Navigation */}
-      <nav className="sidebar">
+      <nav
+        id="primary-sidebar"
+        className={`sidebar ${mobileOpen ? 'sidebar--open' : ''}`}
+        aria-hidden={mobileOpen ? false : undefined}
+      >
         <div className="sidebar-header">
           <Link to="/" className="logo-link">
             <div className="logo-icon">
