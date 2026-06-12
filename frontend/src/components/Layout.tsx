@@ -21,6 +21,8 @@ import {
   X,
 } from 'lucide-react';
 import { SecondarySidebarProvider } from '@/components/SecondarySidebar';
+import logoMark from '@/assets/logo.png';
+import logoWordmark from '@/assets/logo-wordmark.png';
 
 const NAV_COLLAPSED_KEY = 'reink-nav-collapsed';
 
@@ -30,6 +32,8 @@ const NAV_ITEMS = [
   { to: '/contracts', label: 'Contracts', Icon: FileText },
   { to: '/parties', label: 'Parties', Icon: Users },
 ] as const;
+
+const displayVersion = __APP_VERSION__.split('.').slice(0, 2).join('.');
 
 export const Layout: React.FC = () => {
   const location = useLocation();
@@ -82,10 +86,8 @@ export const Layout: React.FC = () => {
           {mobileOpen ? <X size={22} /> : <Menu size={22} />}
         </button>
         <Link to="/" className="mobile-topbar__brand">
-          <div className="mobile-topbar__logo">
-            <FileText size={18} strokeWidth={2.5} />
-          </div>
-          <span>Re-ink</span>
+          <img className="mobile-topbar__logo" src={logoMark} alt="" />
+          <span>re-ink</span>
         </Link>
       </header>
 
@@ -107,12 +109,11 @@ export const Layout: React.FC = () => {
         aria-hidden={mobileOpen ? false : undefined}
       >
         <div className="sidebar-header">
-          <Link to="/" className="logo-link" title={navCollapsed ? 'Re-ink' : undefined}>
-            <div className="logo-icon">
-              <FileText size={28} strokeWidth={2.5} />
-            </div>
+          <Link to="/" className="logo-link" title={navCollapsed ? 're-ink' : undefined}>
+            {/* Collapsed rail shows the bare mark; expanded shows the full lockup. */}
+            <img className="logo-mark" src={logoMark} alt="re-ink" />
             <div className="logo-text">
-              <h1 className="app-title">Re-ink</h1>
+              <img className="logo-lockup" src={logoWordmark} alt="re-ink" />
               <p className="app-subtitle">AI-Powered Reinsurance</p>
             </div>
           </Link>
@@ -144,7 +145,9 @@ export const Layout: React.FC = () => {
         </ul>
 
         <div className="sidebar-footer">
-          <p className="version-info">Version {__APP_VERSION__}</p>
+          <p className="version-info">
+            {navCollapsed ? `v${displayVersion}` : `Version ${displayVersion}`}
+          </p>
         </div>
       </nav>
 

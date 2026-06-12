@@ -1,5 +1,5 @@
 /**
- * HomePage - Landing page for Re-ink application
+ * HomePage - Landing page for re-ink application
  */
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -18,12 +18,12 @@ export const HomePage: React.FC = () => {
             <span>AI-Powered Contract Management</span>
           </div>
           <h1 className="hero-title">
-            <span className="gradient-text">Re-ink</span>
+            <span className="gradient-text">re-ink</span>
             <br />
             Intelligent Reinsurance
           </h1>
           <p className="hero-description">
-            Re-ink transforms complex reinsurance document processing with AI-powered extraction.
+            re-ink transforms complex reinsurance document processing with AI-powered extraction.
             Upload contracts, extract key fields automatically, and manage your reinsurance portfolio with ease.
           </p>
           <div className="hero-actions">
