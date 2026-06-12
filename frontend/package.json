@@ -1,6 +1,6 @@
 {
   "name": "re-ink-frontend",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Frontend for re-ink - Automated Reinsurance Contract Management",
   "private": true,
   "type": "module",
