@@ -185,6 +185,38 @@ async def get_extraction_results(job_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Error retrieving results")
 
 
+@router.get("/file/{job_id}")
+async def get_source_document(job_id: str, db: Session = Depends(get_db)):
+    """
+    Stream the original uploaded document for a job, for the review preview
+    panel. Returns 404 when the file is unavailable (e.g. mock jobs, which
+    carry no file on disk) so the frontend can degrade gracefully.
+    """
+    from fastapi.responses import FileResponse
+    from pathlib import Path
+
+    job = db.query(ExtractionJob).filter(ExtractionJob.job_id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if not job.file_path or not Path(job.file_path).exists():
+        raise HTTPException(status_code=404, detail="Source document not available for this job")
+
+    suffix = Path(job.file_path).suffix.lower()
+    media_type = {
+        ".pdf": "application/pdf",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".doc": "application/msword",
+    }.get(suffix, "application/octet-stream")
+
+    return FileResponse(
+        job.file_path,
+        media_type=media_type,
+        filename=job.filename or Path(job.file_path).name,
+        content_disposition_type="inline",
+    )
+
+
 @router.delete("/{job_id}")
 async def delete_document(job_id: str, db: Session = Depends(get_db)):
     """
@@ -224,6 +256,23 @@ async def seed_mock_job(
         db.delete(existing)
         db.commit()
 
+    def src(page: int, text: str, value=None) -> dict:
+        """Build a mock FieldSource so the source-evidence UI is demonstrable.
+
+        The bounding box is staggered vertically by a stable hash of the text so
+        several fields on the same page don't render stacked on top of each
+        other in the document preview — purely cosmetic for the offline demo.
+        """
+        top = round(0.08 + (sum(ord(c) for c in text) % 70) / 100.0, 3)  # 0.08..0.77
+        return {
+            "value": value,
+            "source_text": text,
+            "page_number": page,
+            "chunk_id": f"mock-{uuid.uuid4().hex[:8]}",
+            "bbox": {"left": 0.08, "top": top, "right": 0.92, "bottom": round(top + 0.05, 3)},
+            "confidence": None,
+        }
+
     scenarios = [
         {
             "contract_data": {
@@ -245,6 +294,21 @@ async def seed_mock_job(
                 {"name": "Vesta Fire Insurance Corp", "role": "cedant", "is_active": True},
                 {"name": "Affirmative Insurance Company", "role": "reinsurer", "is_active": True},
             ],
+            "field_sources": {
+                "contract": {
+                    "contract_name": src(1, "100% QUOTA SHARE REINSURANCE CONTRACT between Vesta Fire Insurance Corp and Affirmative Insurance Company"),
+                    "effective_date": src(1, "This Contract shall apply to losses occurring during the period from July 1, 2024 to June 30, 2025."),
+                    "expiration_date": src(1, "This Contract shall apply to losses occurring during the period from July 1, 2024 to June 30, 2025."),
+                    "premium_description": src(2, "The Reinsurer shall receive 100% of the gross written premium of the Company."),
+                    "line_of_business": src(2, "This Contract covers all Property business written by the Company."),
+                    "coverage_territory": src(2, "The territorial scope of this Contract is the United States of America."),
+                    # coverage_description intentionally ungrounded -> "No source found"
+                },
+                "parties": [
+                    {"name": src(1, "between Vesta Fire Insurance Corp (hereinafter the 'Company')")},
+                    {"name": src(1, "and Affirmative Insurance Company (hereinafter the 'Reinsurer')")},
+                ],
+            },
             "confidence_score": 0.91,
             "extraction_metadata": {"filename": "quota-share-reinsurance-contract.pdf", "page_count": 4},
         },
@@ -272,6 +336,19 @@ async def seed_mock_job(
                 {"name": "Republic Insurance Company", "role": "cedant", "is_active": True},
                 {"name": "Winterthur Swiss Insurance", "role": "reinsurer", "is_active": True},
             ],
+            "field_sources": {
+                "contract": {
+                    "contract_name": src(1, "EXCESS OF LOSS REINSURANCE AGREEMENT"),
+                    "limit_description": src(3, "The Reinsurer shall be liable for $10,000,000 excess of $5,000,000 each and every loss occurrence."),
+                    "limit_amount": src(3, "The Reinsurer shall be liable for $10,000,000 excess of $5,000,000 each and every loss occurrence.", value=10000000.0),
+                    "retention_description": src(3, "The Company shall retain $5,000,000 each and every loss occurrence."),
+                    "premium_description": src(4, "Rate on line of 8.5% applied to the subject premium income."),
+                },
+                "parties": [
+                    {"name": src(1, "Republic Insurance Company, the Reinsured")},
+                    {},  # reinsurer name ungrounded -> "Needs manual verification"
+                ],
+            },
             "confidence_score": 0.88,
             "extraction_metadata": {"filename": "excess-of-loss-reinsurance-agreement.pdf", "page_count": 6},
         },
@@ -301,6 +378,23 @@ async def seed_mock_job(
                 {"name": "Swiss Reinsurance Company Ltd", "role": "reinsurer", "is_active": True},
                 {"name": "Aon Benfield Securities", "role": "broker", "is_active": True},
             ],
+            "field_sources": {
+                "contract": {
+                    "contract_name": src(1, "FIRST SURPLUS TREATY REINSURANCE CONTRACT"),
+                    "effective_date": src(1, "Period: January 1, 2025 to December 31, 2025, both days inclusive."),
+                    "expiration_date": src(1, "Period: January 1, 2025 to December 31, 2025, both days inclusive."),
+                    "limit_description": src(2, "Maximum cession of 4 lines, subject to a maximum of $20,000,000 any one risk."),
+                    "limit_amount": src(2, "Maximum cession of 4 lines, subject to a maximum of $20,000,000 any one risk.", value=20000000.0),
+                    "retention_description": src(2, "The Company shall retain net for its own account $5,000,000 each and every risk."),
+                    "commission_description": src(4, "The Reinsurer shall allow the Company a ceding commission of 30% on ceded premiums."),
+                    "commission_rate": src(4, "The Reinsurer shall allow the Company a ceding commission of 30% on ceded premiums.", value=30.0),
+                },
+                "parties": [
+                    {"name": src(1, "National Union Fire Insurance (the 'Company')")},
+                    {"name": src(1, "Swiss Reinsurance Company Ltd (the 'Reinsurer')")},
+                    {},  # broker ungrounded
+                ],
+            },
             "confidence_score": 0.94,
             "extraction_metadata": {"filename": "first-surplus-treaty.pdf", "page_count": 8},
         },

@@ -76,6 +76,12 @@ export const documentApi = {
   },
 
   /**
+   * Build the URL that streams the original uploaded document for a job.
+   * Used by the review preview panel. Returns a 404 for mock jobs (no file).
+   */
+  getFileUrl: (jobId: string): string => `${API_BASE_URL}/documents/file/${jobId}`,
+
+  /**
    * Seed a mock extraction job for local testing (skips LandingAI).
    */
   seedMockJob: async (jobId?: string): Promise<DocumentExtractionStatus> => {

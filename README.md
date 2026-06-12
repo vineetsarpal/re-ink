@@ -16,6 +16,7 @@ re-ink is a full-stack web application that streamlines reinsurance contract man
 - 📄 **Document Upload**: Upload PDF and DOCX reinsurance contract documents
 - 🤖 **AI Extraction**: Automatic extraction of contract terms and parties using LandingAI
 - ✅ **Review Workflow**: Review and edit AI-extracted data before creating records
+- 🔎 **Source-Grounded Review**: Every extracted field links back to the passage and page it came from, so reviewers can verify AI output at a glance
 - 📊 **Contract Management**: Full CRUD operations for reinsurance contracts
 - 👥 **Party Management**: Manage parties (cedants, reinsurers, brokers)
 - 🔍 **Search & Filter**: Find contracts and parties quickly
@@ -196,7 +197,7 @@ re-ink/
 1. **Upload**: User uploads a reinsurance contract document (PDF or DOCX)
 2. **Extract**: System sends document to LandingAI for AI-powered extraction
 3. **Process**: AI extracts contract details, dates, financial terms, and party information
-4. **Review**: User reviews and edits the extracted data in a user-friendly form
+4. **Review**: User reviews and edits the extracted data in a user-friendly form, with source evidence showing the page/passage behind each grounded field
 5. **Approve**: User approves the data, creating Contract and Party records
 6. **Manage**: Contracts and parties can be viewed, searched, and managed
 
@@ -206,6 +207,7 @@ re-ink/
 - `POST /api/documents/upload` - Upload a document and start extraction in the background
 - `GET /api/documents/status/{job_id}` - Check extraction status (supports `processing`, `completed`, `failed`)
 - `GET /api/documents/results/{job_id}` - Retrieve parsed extraction results when a job is complete
+- `GET /api/documents/file/{job_id}` - Stream the original uploaded document for the review preview panel (404 for mock jobs)
 
 ### Contracts
 - `GET /api/contracts/` - List contracts (supports `status`, `contract_type`, `skip`, `limit` filters)

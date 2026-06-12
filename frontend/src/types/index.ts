@@ -79,9 +79,35 @@ export interface DocumentUploadResponse {
   status: string;
 }
 
+/**
+ * Source evidence for a single extracted field — grounds an AI value back to
+ * the uploaded document so reviewers can verify it quickly. All fields are
+ * optional: a field may be only partially grounded (e.g. page known, text not).
+ */
+export interface FieldSource {
+  value?: any;
+  source_text?: string | null;
+  page_number?: number | null;
+  chunk_id?: string | null;
+  bbox?: { left: number; top: number; right: number; bottom: number } | null;
+  confidence?: number | null;
+}
+
+/**
+ * Source evidence keyed for review:
+ * - `contract`: display-column name -> FieldSource
+ * - `parties`:  aligned by index with `parties_data`; each maps a party field
+ *   (currently just `name`) -> FieldSource
+ */
+export interface FieldSources {
+  contract: Record<string, FieldSource>;
+  parties: Record<string, FieldSource>[];
+}
+
 export interface ExtractionResult {
   contract_data: Record<string, any>;
   parties_data: Record<string, any>[];
+  field_sources?: FieldSources | null;
   confidence_score?: number;
   extraction_metadata?: Record<string, any>;
 }

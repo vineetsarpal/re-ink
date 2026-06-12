@@ -67,3 +67,7 @@ htmlcov/
 
 # Alembic
 alembic/versions/*.pyc
+
+# Promo
+promo/
+renders/

@@ -3,11 +3,12 @@
  * Allows users to verify AI-extracted information before creating records.
  * Includes fuzzy-matching against existing parties to prevent duplicates.
  */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
-import { Save, X, Edit, RefreshCw, Search, UserCheck, UserPlus } from 'lucide-react';
+import { Save, X, Edit, RefreshCw, Search, UserCheck, UserPlus, FileText, FileSearch, Maximize2 } from 'lucide-react';
 import type {
   ExtractionResult,
+  FieldSource,
   ReviewData,
   Party,
   PartyAction,
@@ -16,9 +17,57 @@ import type {
   GuidedIntakeResponse,
 } from '@/types';
 import { reviewApi, partyApi } from '@/services/api';
+import { DocumentPreview, type GroundedBox } from '@/components/DocumentPreview';
+import { SecondarySidebar } from '@/components/SecondarySidebar';
+
+/**
+ * Declarative description of the contract form fields. Driving the render from
+ * a config (rather than ~20 hand-written inputs) lets every field share the
+ * same source-evidence wiring: focus a field -> reveal where its value came
+ * from in the document. `name` matches the DB column / source-evidence key.
+ */
+interface ContractFieldConfig {
+  name: string;
+  label: string;
+  type?: 'text' | 'date' | 'textarea';
+  required?: boolean;
+  placeholder?: string;
+  defaultValue?: string;
+  fullWidth?: boolean;
+}
+
+const CONTRACT_FIELDS: ContractFieldConfig[] = [
+  { name: 'contract_number', label: 'Contract Number *', required: true },
+  { name: 'contract_name', label: 'Contract Name *', required: true },
+  { name: 'contract_type', label: 'Contract Type' },
+  { name: 'contract_sub_type', label: 'Contract Sub-Type' },
+  { name: 'contract_nature', label: 'Contract Nature' },
+  { name: 'effective_date', label: 'Effective Date *', type: 'date', required: true },
+  { name: 'expiration_date', label: 'Expiration Date *', type: 'date', required: true },
+  { name: 'premium_amount', label: 'Premium Amount' },
+  { name: 'premium_description', label: 'Premium Description', placeholder: 'e.g. 100% of gross premium' },
+  { name: 'currency', label: 'Currency', defaultValue: 'USD' },
+  { name: 'limit_amount', label: 'Limit Amount' },
+  { name: 'limit_description', label: 'Limit Description', placeholder: 'e.g. 100% quota share' },
+  { name: 'retention_amount', label: 'Retention/Deductible Amount' },
+  { name: 'retention_description', label: 'Retention/Deductible Description', placeholder: 'e.g. $150,000,000 net of recoveries' },
+  { name: 'commission_description', label: 'Commission', placeholder: 'e.g. all expenses + 0.5% of net written premium' },
+  { name: 'commission_rate', label: 'Commission Rate (%)' },
+  { name: 'line_of_business', label: 'Line of Business' },
+  { name: 'coverage_territory', label: 'Coverage Territory', fullWidth: true },
+  { name: 'coverage_description', label: 'Coverage Description', type: 'textarea', fullWidth: true },
+  { name: 'terms_and_conditions', label: 'Terms and Conditions', type: 'textarea', fullWidth: true },
+  { name: 'special_provisions', label: 'Special Provisions', type: 'textarea', fullWidth: true },
+];
+
+const CONTRACT_LABELS: Record<string, string> = Object.fromEntries(
+  CONTRACT_FIELDS.map((f) => [f.name, f.label.replace(/\s*\*$/, '')]),
+);
 
 interface ReviewFormProps {
   extractionResult: ExtractionResult;
+  /** URL streaming the original document for preview. Null for mock jobs. */
+  documentUrl?: string | null;
   agentAnalysis?: GuidedIntakeResponse | null;
   agentLoading?: boolean;
   agentError?: string | null;
@@ -30,6 +79,7 @@ interface ReviewFormProps {
 
 export const ReviewForm: React.FC<ReviewFormProps> = ({
   extractionResult,
+  documentUrl = null,
   agentAnalysis,
   agentLoading = false,
   agentError = null,
@@ -40,6 +90,72 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
 }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+
+  // Source grounding: which field's evidence is shown in the side panel, and
+  // whether the document preview is expanded. `activeKey` is "contract:<name>"
+  // or "party:<index>".
+  const contractSources = extractionResult.field_sources?.contract ?? {};
+  const partySources = extractionResult.field_sources?.parties ?? [];
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  // Whether the document-with-boxes preview is opened in the enlarge modal.
+  const [isPreviewExpanded, setIsPreviewExpanded] = useState(false);
+  // Tracks the source-grounding sidebar; per-field source links only render
+  // while the panel is open, since that's where they reveal their evidence.
+  const [isSourcePanelCollapsed, setIsSourcePanelCollapsed] = useState(false);
+  // Bumped on every Source-link click so the preview re-jumps to the field's
+  // page even when the same field is clicked twice (after manual paging).
+  const [jumpSignal, setJumpSignal] = useState(0);
+
+  const focusSource = (fieldKey: string) => {
+    setActiveKey(fieldKey);
+    setJumpSignal((n) => n + 1);
+  };
+
+  const groundedCount = useMemo(() => {
+    const contract = Object.keys(contractSources).length;
+    const parties = partySources.filter((p) => p && p.name).length;
+    return contract + parties;
+  }, [contractSources, partySources]);
+
+  // All grounded passages with a page + bounding box, flattened into the shape
+  // DocumentPreview draws. The `key` mirrors `activeKey` so focusing a field and
+  // clicking its box stay in sync. Party labels track the live edited name.
+  const groundedBoxes = useMemo<GroundedBox[]>(() => {
+    const result: GroundedBox[] = [];
+    Object.entries(contractSources).forEach(([name, source]) => {
+      if (source?.bbox && source.page_number != null) {
+        result.push({
+          key: `contract:${name}`,
+          label: CONTRACT_LABELS[name] ?? name,
+          page: source.page_number,
+          bbox: source.bbox,
+        });
+      }
+    });
+    partySources.forEach((p, idx) => {
+      const source = p?.name;
+      if (source?.bbox && source.page_number != null) {
+        const name = extractionResult.parties_data?.[idx]?.name || `Party ${idx + 1}`;
+        result.push({
+          key: `party:${idx}`,
+          label: `${name} — Name`,
+          page: source.page_number,
+          bbox: source.bbox,
+        });
+      }
+    });
+    return result;
+  }, [contractSources, partySources, extractionResult.parties_data]);
+
+  // Close the enlarge modal on Escape.
+  useEffect(() => {
+    if (!isPreviewExpanded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsPreviewExpanded(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isPreviewExpanded]);
 
   // Party matching state
   const [matchResults, setMatchResults] = useState<Record<number, PartyMatchResult>>({});
@@ -266,10 +382,58 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
     return 'low';
   };
 
+  // Resolve the currently-focused field into a label + its source evidence for
+  // the side panel. Party labels use the live name so the panel stays in sync.
+  const activeSource = useMemo<{ label: string; source: FieldSource | null } | null>(() => {
+    if (!activeKey) return null;
+    const [scope, key] = activeKey.split(':');
+    if (scope === 'contract') {
+      return { label: CONTRACT_LABELS[key] ?? key, source: contractSources[key] ?? null };
+    }
+    const idx = Number(key);
+    const name =
+      watch(`parties.${idx}.name`) ||
+      extractionResult.parties_data?.[idx]?.name ||
+      `Party ${idx + 1}`;
+    return { label: `${name} — Name`, source: partySources[idx]?.name ?? null };
+  }, [activeKey, contractSources, partySources, watch, extractionResult.parties_data]);
+
+  // Small inline affordance shown under each field. Clicking it (or focusing the
+  // field) reveals the evidence in the side panel.
+  const renderSourceHint = (fieldKey: string, source: FieldSource | null | undefined) => {
+    if (isSourcePanelCollapsed) return null;
+    const isActive = activeKey === fieldKey;
+    if (!source) {
+      return (
+        <span className="source-hint source-hint--none" title="The AI did not link this value to a passage in the document.">
+          No source found · verify manually
+        </span>
+      );
+    }
+    return (
+      <button
+        type="button"
+        className={`source-hint source-hint--found ${isActive ? 'source-hint--active' : ''}`}
+        onClick={() => focusSource(fieldKey)}
+      >
+        <FileText size={12} />
+        {source.page_number != null ? `Source · p.${source.page_number}` : 'Source available'}
+      </button>
+    );
+  };
+
   return (
     <div className="review-form">
       <div className="form-header">
-        <h2>Review Extracted Data</h2>
+        <div>
+          <h2>Review Extracted Data</h2>
+          <p className="review-form__grounding-note">
+            <FileSearch size={14} />
+            {groundedCount > 0
+              ? `${groundedCount} field${groundedCount === 1 ? '' : 's'} linked to the source document — focus any field to verify.`
+              : 'No source evidence available for this extraction — verify fields manually.'}
+          </p>
+        </div>
         <div className="header-actions">
           <button
             onClick={() => setIsEditing(!isEditing)}
@@ -281,6 +445,7 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
         </div>
       </div>
 
+      <div className="review-layout">
       <form onSubmit={(e) => {
         handleSubmit(
           onSubmit,
@@ -313,189 +478,46 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
           <h3>Contract Information</h3>
 
           <div className="form-grid">
-            <div className="form-field">
-              <label htmlFor="contract_number">Contract Number *</label>
-              <input
-                id="contract_number"
-                {...register('contract.contract_number', { required: true })}
-                disabled={!isEditing}
-                className={errors.contract?.contract_number ? 'error' : ''}
-              />
-              {errors.contract?.contract_number && (
-                <span className="field-error">Required field</span>
-              )}
-            </div>
-
-            <div className="form-field">
-              <label htmlFor="contract_name">Contract Name *</label>
-              <input
-                id="contract_name"
-                {...register('contract.contract_name', { required: true })}
-                disabled={!isEditing}
-                className={errors.contract?.contract_name ? 'error' : ''}
-              />
-            </div>
-
-            <div className="form-field">
-              <label htmlFor="contract_type">Contract Type</label>
-              <input
-                id="contract_type"
-                {...register('contract.contract_type')}
-                disabled={!isEditing}
-              />
-            </div>
-
-            <div className="form-field">
-              <label htmlFor="contract_sub_type">Contract Sub-Type</label>
-              <input
-                id="contract_sub_type"
-                {...register('contract.contract_sub_type')}
-                disabled={!isEditing}
-              />
-            </div>
-
-            <div className="form-field">
-              <label htmlFor="contract_nature">Contract Nature</label>
-              <input
-                id="contract_nature"
-                {...register('contract.contract_nature')}
-                disabled={!isEditing}
-              />
-            </div>
-
-            <div className="form-field">
-              <label htmlFor="effective_date">Effective Date *</label>
-              <input
-                type="date"
-                id="effective_date"
-                {...register('contract.effective_date', { required: true })}
-                disabled={!isEditing}
-              />
-            </div>
-
-            <div className="form-field">
-              <label htmlFor="expiration_date">Expiration Date *</label>
-              <input
-                type="date"
-                id="expiration_date"
-                {...register('contract.expiration_date', { required: true })}
-                disabled={!isEditing}
-              />
-            </div>
-
-            <div className="form-field">
-              <label htmlFor="premium_amount">Premium Amount</label>
-              <input
-                id="premium_amount"
-                {...register('contract.premium_amount')}
-                disabled={!isEditing}
-              />
-            </div>
-
-            <div className="form-field">
-              <label htmlFor="premium_description">Premium Description</label>
-              <input
-                id="premium_description"
-                {...register('contract.premium_description')}
-                disabled={!isEditing}
-                placeholder="e.g. 100% of gross premium"
-              />
-            </div>
-
-            <div className="form-field">
-              <label htmlFor="currency">Currency</label>
-              <input
-                id="currency"
-                {...register('contract.currency')}
-                disabled={!isEditing}
-                defaultValue="USD"
-              />
-            </div>
-
-            <div className="form-field">
-              <label htmlFor="limit_amount">Limit Amount</label>
-              <input
-                id="limit_amount"
-                {...register('contract.limit_amount')}
-                disabled={!isEditing}
-              />
-            </div>
-
-            <div className="form-field">
-              <label htmlFor="limit_description">Limit Description</label>
-              <input
-                id="limit_description"
-                {...register('contract.limit_description')}
-                disabled={!isEditing}
-                placeholder="e.g. 100% quota share"
-              />
-            </div>
-
-            <div className="form-field">
-              <label htmlFor="retention_amount">Retention/Deductible Amount</label>
-              <input
-                id="retention_amount"
-                {...register('contract.retention_amount')}
-                disabled={!isEditing}
-              />
-            </div>
-
-            <div className="form-field">
-              <label htmlFor="retention_description">Retention/Deductible Description</label>
-              <input
-                id="retention_description"
-                {...register('contract.retention_description')}
-                disabled={!isEditing}
-                placeholder="e.g. $150,000,000 net of recoveries"
-              />
-            </div>
-
-            <div className="form-field">
-              <label htmlFor="commission_description">Commission</label>
-              <input
-                id="commission_description"
-                {...register('contract.commission_description')}
-                disabled={!isEditing}
-                placeholder="e.g. all expenses + 0.5% of net written premium"
-              />
-            </div>
-
-            <div className="form-field">
-              <label htmlFor="commission_rate">Commission Rate (%)</label>
-              <input
-                id="commission_rate"
-                {...register('contract.commission_rate')}
-                disabled={!isEditing}
-              />
-            </div>
-
-            <div className="form-field">
-              <label htmlFor="line_of_business">Line of Business</label>
-              <input
-                id="line_of_business"
-                {...register('contract.line_of_business')}
-                disabled={!isEditing}
-              />
-            </div>
-
-            <div className="form-field full-width">
-              <label htmlFor="coverage_territory">Coverage Territory</label>
-              <input
-                id="coverage_territory"
-                {...register('contract.coverage_territory')}
-                disabled={!isEditing}
-              />
-            </div>
-
-            <div className="form-field full-width">
-              <label htmlFor="coverage_description">Coverage Description</label>
-              <textarea
-                id="coverage_description"
-                rows={3}
-                {...register('contract.coverage_description')}
-                disabled={!isEditing}
-              />
-            </div>
+            {CONTRACT_FIELDS.map((field) => {
+              const fieldKey = `contract:${field.name}`;
+              const source = contractSources[field.name];
+              const hasError = field.required && (errors.contract as any)?.[field.name];
+              const registration = register(
+                `contract.${field.name}` as const,
+                field.required ? { required: true } : undefined,
+              );
+              return (
+                <div
+                  key={field.name}
+                  className={`form-field ${field.fullWidth ? 'full-width' : ''} ${activeKey === fieldKey ? 'form-field--active-source' : ''}`}
+                >
+                  <label htmlFor={field.name}>{field.label}</label>
+                  {field.type === 'textarea' ? (
+                    <textarea
+                      id={field.name}
+                      rows={3}
+                      {...registration}
+                      disabled={!isEditing}
+                      placeholder={field.placeholder}
+                      onFocus={() => setActiveKey(fieldKey)}
+                    />
+                  ) : (
+                    <input
+                      id={field.name}
+                      type={field.type ?? 'text'}
+                      {...registration}
+                      disabled={!isEditing}
+                      placeholder={field.placeholder}
+                      defaultValue={field.defaultValue}
+                      className={hasError ? 'error' : ''}
+                      onFocus={() => setActiveKey(fieldKey)}
+                    />
+                  )}
+                  {hasError && <span className="field-error">Required field</span>}
+                  {renderSourceHint(fieldKey, source)}
+                </div>
+              );
+            })}
           </div>
         </section>
 
@@ -572,12 +594,14 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
                 </div>
 
                 <div className="form-grid">
-                  <div className="form-field full-width">
+                  <div className={`form-field full-width ${activeKey === `party:${index}` ? 'form-field--active-source' : ''}`}>
                     <label>Name *</label>
                     <input
                       {...register(`parties.${index}.name`, { required: true })}
                       disabled={!isEditing || isLinked}
+                      onFocus={() => setActiveKey(`party:${index}`)}
                     />
+                    {renderSourceHint(`party:${index}`, partySources[index]?.name)}
                   </div>
 
                   <div className="form-field">
@@ -828,6 +852,118 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
           </button>
         </div>
       </form>
+
+      {/* Source grounding panel — projected into the layout's secondary
+          sidebar (flush against the nav) while the review step is mounted.
+          Reveals where a focused field's value came from in the document, and
+          (for real jobs) jumps the document preview to the matching page. */}
+      <SecondarySidebar
+        title="Source Grounding"
+        icon={<FileSearch size={15} />}
+        collapsed={isSourcePanelCollapsed}
+        onCollapsedChange={setIsSourcePanelCollapsed}
+      >
+        {!activeSource && (
+          <p className="source-panel__hint">
+            Select or focus any field to see where its value was found in the
+            uploaded document.
+          </p>
+        )}
+
+        {activeSource && (
+          <div className="source-panel__body">
+            <p className="source-panel__field-label">{activeSource.label}</p>
+
+            {activeSource.source ? (
+              <>
+                {activeSource.source.page_number != null && (
+                  <span className="source-panel__page">
+                    Page {activeSource.source.page_number}
+                  </span>
+                )}
+                {activeSource.source.source_text ? (
+                  <blockquote className="source-panel__quote">
+                    {activeSource.source.source_text}
+                  </blockquote>
+                ) : (
+                  <p className="source-panel__partial">
+                    Referenced in the document
+                    {activeSource.source.page_number != null
+                      ? ` on page ${activeSource.source.page_number}`
+                      : ''}
+                    , but the exact passage could not be located. Please verify
+                    manually.
+                  </p>
+                )}
+                {activeSource.source.confidence != null && (
+                  <p className="source-panel__confidence">
+                    Confidence: {(activeSource.source.confidence * 100).toFixed(0)}%
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="source-panel__none">
+                No source found for this field. <strong>Needs manual
+                verification.</strong>
+              </p>
+            )}
+          </div>
+        )}
+
+        {documentUrl && (
+          <div className="source-panel__preview">
+            <div className="source-panel__preview-head">
+              <span className="source-panel__preview-title">
+                <FileText size={14} /> Original document
+              </span>
+              <button
+                type="button"
+                className="source-panel__enlarge"
+                onClick={() => setIsPreviewExpanded(true)}
+              >
+                <Maximize2 size={13} /> Enlarge
+              </button>
+            </div>
+            <p className="source-panel__preview-help">
+              {groundedBoxes.length > 0
+                ? 'Highlighted boxes mark where each field was found. Click a box or a field’s Source link to jump to it.'
+                : 'Focus a field with a Source link to locate it in the document.'}
+            </p>
+            <DocumentPreview
+              documentUrl={documentUrl}
+              boxes={groundedBoxes}
+              activeKey={activeKey}
+              jumpSignal={jumpSignal}
+              onSelectBox={setActiveKey}
+              onToggleFullscreen={() => setIsPreviewExpanded(true)}
+            />
+          </div>
+        )}
+      </SecondarySidebar>
+      </div>
+
+      {/* Enlarged document-with-boxes view. */}
+      {documentUrl && isPreviewExpanded && (
+        <div
+          className="doc-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Document preview"
+          onClick={() => setIsPreviewExpanded(false)}
+        >
+          <div className="doc-modal__panel" onClick={(e) => e.stopPropagation()}>
+            <DocumentPreview
+              documentUrl={documentUrl}
+              boxes={groundedBoxes}
+              activeKey={activeKey}
+              jumpSignal={jumpSignal}
+              onSelectBox={setActiveKey}
+              fullscreen
+              onToggleFullscreen={() => setIsPreviewExpanded(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

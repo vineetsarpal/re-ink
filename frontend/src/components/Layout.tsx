@@ -4,16 +4,53 @@
  * Sidebar is a fixed column on desktop and an off-canvas drawer on mobile.
  * The drawer is toggled by a hamburger button in the mobile top bar, and
  * auto-closes whenever the route changes so navigation doesn't leave it open.
+ *
+ * On desktop the sidebar also collapses to an icon-only rail (persisted in
+ * localStorage). A secondary sidebar slot sits between the nav and the main
+ * content; pages project contextual panels into it (see SecondarySidebar).
  */
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation, Outlet } from 'react-router-dom';
-import { FileText, Upload, Users, LayoutDashboard, Menu, X } from 'lucide-react';
+import {
+  FileText,
+  Upload,
+  Users,
+  LayoutDashboard,
+  Menu,
+  PanelLeft,
+  X,
+} from 'lucide-react';
+import { SecondarySidebarProvider } from '@/components/SecondarySidebar';
+
+const NAV_COLLAPSED_KEY = 'reink-nav-collapsed';
+
+const NAV_ITEMS = [
+  { to: '/dashboard', label: 'Dashboard', Icon: LayoutDashboard },
+  { to: '/upload', label: 'Upload Document', Icon: Upload },
+  { to: '/contracts', label: 'Contracts', Icon: FileText },
+  { to: '/parties', label: 'Parties', Icon: Users },
+] as const;
 
 export const Layout: React.FC = () => {
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState(
+    () => localStorage.getItem(NAV_COLLAPSED_KEY) === '1',
+  );
+
+  // Secondary sidebar slot: host element + how many panels project into it.
+  const [slotHost, setSlotHost] = useState<HTMLElement | null>(null);
+  const [slotOccupants, setSlotOccupants] = useState(0);
 
   const isActive = (path: string) => location.pathname === path;
+
+  const toggleNav = () => {
+    setNavCollapsed((collapsed) => {
+      const next = !collapsed;
+      localStorage.setItem(NAV_COLLAPSED_KEY, next ? '1' : '0');
+      return next;
+    });
+  };
 
   // Close the drawer whenever the route changes.
   useEffect(() => {
@@ -64,11 +101,13 @@ export const Layout: React.FC = () => {
       {/* Sidebar Navigation */}
       <nav
         id="primary-sidebar"
-        className={`sidebar ${mobileOpen ? 'sidebar--open' : ''}`}
+        className={`sidebar ${mobileOpen ? 'sidebar--open' : ''} ${
+          navCollapsed ? 'sidebar--collapsed' : ''
+        }`}
         aria-hidden={mobileOpen ? false : undefined}
       >
         <div className="sidebar-header">
-          <Link to="/" className="logo-link">
+          <Link to="/" className="logo-link" title={navCollapsed ? 'Re-ink' : undefined}>
             <div className="logo-icon">
               <FileText size={28} strokeWidth={2.5} />
             </div>
@@ -77,48 +116,31 @@ export const Layout: React.FC = () => {
               <p className="app-subtitle">AI-Powered Reinsurance</p>
             </div>
           </Link>
+          <button
+            type="button"
+            className="sidebar-toggle"
+            onClick={toggleNav}
+            aria-label={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-expanded={!navCollapsed}
+            title={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            <PanelLeft size={18} />
+          </button>
         </div>
 
         <ul className="nav-menu">
-          <li>
-            <Link
-              to="/dashboard"
-              className={`nav-link ${isActive('/dashboard') ? 'active' : ''}`}
-            >
-              <LayoutDashboard size={20} />
-              <span>Dashboard</span>
-            </Link>
-          </li>
-
-          <li>
-            <Link
-              to="/upload"
-              className={`nav-link ${isActive('/upload') ? 'active' : ''}`}
-            >
-              <Upload size={20} />
-              <span>Upload Document</span>
-            </Link>
-          </li>
-
-          <li>
-            <Link
-              to="/contracts"
-              className={`nav-link ${isActive('/contracts') ? 'active' : ''}`}
-            >
-              <FileText size={20} />
-              <span>Contracts</span>
-            </Link>
-          </li>
-
-          <li>
-            <Link
-              to="/parties"
-              className={`nav-link ${isActive('/parties') ? 'active' : ''}`}
-            >
-              <Users size={20} />
-              <span>Parties</span>
-            </Link>
-          </li>
+          {NAV_ITEMS.map(({ to, label, Icon }) => (
+            <li key={to}>
+              <Link
+                to={to}
+                className={`nav-link ${isActive(to) ? 'active' : ''}`}
+                title={navCollapsed ? label : undefined}
+              >
+                <Icon size={20} />
+                <span>{label}</span>
+              </Link>
+            </li>
+          ))}
         </ul>
 
         <div className="sidebar-footer">
@@ -126,10 +148,24 @@ export const Layout: React.FC = () => {
         </div>
       </nav>
 
+      {/* Secondary sidebar slot — flush against the nav; pages project
+          contextual panels (e.g. source grounding) into it via a portal. */}
+      <aside
+        ref={setSlotHost}
+        className={`secondary-sidebar ${
+          slotOccupants > 0 ? '' : 'secondary-sidebar--empty'
+        }`}
+        aria-label="Contextual panel"
+      />
+
       {/* Main Content Area */}
       <main className="main-content">
         <div className="content-wrapper">
-          <Outlet />
+          <SecondarySidebarProvider
+            value={{ host: slotHost, setOccupants: setSlotOccupants }}
+          >
+            <Outlet />
+          </SecondarySidebarProvider>
         </div>
       </main>
     </div>

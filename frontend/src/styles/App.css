@@ -149,6 +149,176 @@ body {
   color: var(--text-secondary);
 }
 
+/* Collapse/expand toggle for the nav sidebar. Lives in the header: pinned to
+   the top-right corner when expanded, centered under the logo when collapsed.
+   Hidden on mobile along with the rest of the header (drawer covers it). */
+.sidebar-toggle {
+  appearance: none;
+  background: transparent;
+  border: none;
+  border-radius: 0.5rem;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.sidebar-toggle:hover {
+  background: rgba(59, 130, 246, 0.08);
+  color: var(--primary-color);
+}
+
+/* Icon-only nav rail — desktop only; mobile keeps the off-canvas drawer. */
+@media (min-width: 769px) {
+  .sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    transition: width 0.2s ease;
+  }
+
+  .sidebar-header {
+    position: relative;
+  }
+
+  .sidebar-toggle {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.6rem;
+  }
+
+  .sidebar--collapsed {
+    width: 76px;
+  }
+
+  .sidebar--collapsed .sidebar-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 1.25rem 0.5rem;
+  }
+
+  .sidebar--collapsed .sidebar-toggle {
+    position: static;
+  }
+
+  .sidebar--collapsed .logo-link {
+    padding: 0;
+  }
+
+  .sidebar--collapsed .logo-link:hover {
+    transform: none;
+  }
+
+  .sidebar--collapsed .logo-icon {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+  }
+
+  .sidebar--collapsed .logo-text,
+  .sidebar--collapsed .nav-link span,
+  .sidebar--collapsed .version-info {
+    display: none;
+  }
+
+  .sidebar--collapsed .nav-link {
+    justify-content: center;
+    padding: 0.75rem 0;
+  }
+
+  .sidebar--collapsed .sidebar-footer {
+    padding: 0.75rem 0.5rem;
+  }
+}
+
+/* ============================================
+   SECONDARY SIDEBAR
+   A contextual panel slot flush against the nav sidebar. Pages project
+   content into it via <SecondarySidebar> (e.g. source grounding during
+   document review). Collapses to a slim rail with an expand button.
+   ============================================ */
+.secondary-sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-right: 1px solid var(--border-color);
+}
+
+.secondary-sidebar--empty {
+  display: none;
+}
+
+.secondary-sidebar__panel {
+  display: flex;
+  flex-direction: column;
+  width: clamp(330px, 30vw, 450px);
+  height: 100%;
+  min-height: 0;
+}
+
+.secondary-sidebar__rail {
+  width: 52px;
+  display: flex;
+  justify-content: center;
+  padding-top: 0.65rem;
+}
+
+.secondary-sidebar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.9rem 1.25rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.secondary-sidebar__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.secondary-sidebar__btn {
+  appearance: none;
+  background: transparent;
+  border: none;
+  border-radius: 0.5rem;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.secondary-sidebar__btn:hover {
+  background: rgba(59, 130, 246, 0.08);
+  color: var(--primary-color);
+}
+
+.secondary-sidebar__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1rem 1.25rem 1.25rem;
+}
+
 .main-content {
   flex: 1;
   overflow-y: auto;
@@ -1747,8 +1917,35 @@ tbody tr:last-child td {
 /* Responsive Design */
 @media (max-width: 768px) {
   .app-layout {
-    /* Leave room above the content for the fixed mobile top bar. */
+    /* Leave room above the content for the fixed mobile top bar. The nav
+       sidebar is a fixed drawer here, so stacking the remaining children
+       (secondary sidebar, main) keeps each full-width. */
+    flex-direction: column;
     padding-top: 56px;
+  }
+
+  /* Secondary sidebar becomes a full-width section above the content. */
+  .secondary-sidebar {
+    position: static;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .secondary-sidebar__panel {
+    width: 100%;
+    height: auto;
+  }
+
+  .secondary-sidebar__body {
+    overflow-y: visible;
+    max-height: none;
+  }
+
+  .secondary-sidebar__rail {
+    width: 100%;
+    justify-content: flex-start;
+    padding: 0.4rem 0.75rem;
   }
 
   .mobile-topbar {
@@ -2232,3 +2429,364 @@ tbody tr:last-child td {
     font-size: 1rem;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Source-grounded review: evidence panel + per-field source hints     */
+/* ------------------------------------------------------------------ */
+
+.review-form__grounding-note {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+/* The form takes the full content width; source evidence lives in the
+   layout-level secondary sidebar (see .secondary-sidebar). */
+.review-layout > form {
+  min-width: 0;
+}
+
+/* Per-field source hint shown beneath each input. */
+.source-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.3rem;
+  font-size: 0.72rem;
+  line-height: 1.2;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.source-hint--found {
+  color: var(--primary-color);
+}
+
+.source-hint--found:hover,
+.source-hint--active {
+  text-decoration: underline;
+  font-weight: 600;
+}
+
+.source-hint--none {
+  color: var(--text-secondary);
+  font-style: italic;
+  cursor: default;
+}
+
+/* Highlight the field whose evidence is currently displayed. */
+.form-field--active-source > input,
+.form-field--active-source > textarea {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px rgb(37 99 235 / 0.15);
+}
+
+/* Evidence panel pieces — rendered inside the secondary sidebar's body. */
+
+.source-panel__hint {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.source-panel__field-label {
+  font-weight: 600;
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+  color: var(--text-primary);
+}
+
+.source-panel__page {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--primary-color);
+  background: rgb(37 99 235 / 0.08);
+  border-radius: 4px;
+  padding: 0.1rem 0.45rem;
+  margin-bottom: 0.5rem;
+}
+
+.source-panel__quote {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  border-left: 3px solid var(--primary-color);
+  background: var(--background);
+  border-radius: 0 4px 4px 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.source-panel__partial,
+.source-panel__none {
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.source-panel__none strong {
+  color: var(--warning-color);
+}
+
+.source-panel__confidence {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.source-panel__preview {
+  margin-top: 1rem;
+  border-top: 1px solid var(--border-color);
+  padding-top: 0.85rem;
+}
+
+.source-panel__preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.source-panel__preview-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.source-panel__enlarge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--primary-color);
+  background: rgb(37 99 235 / 0.08);
+  border: 1px solid rgb(37 99 235 / 0.2);
+  border-radius: 5px;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+}
+
+.source-panel__enlarge:hover {
+  background: rgb(37 99 235 / 0.14);
+}
+
+.source-panel__preview-help {
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  margin: 0.4rem 0 0.6rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Document preview: pdf.js canvas + bounding-box overlays            */
+/* ------------------------------------------------------------------ */
+
+.doc-preview {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.doc-preview__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--background);
+}
+
+.doc-preview__pager,
+.doc-preview__tools {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.doc-preview__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.doc-preview__btn:hover:not(:disabled) {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.doc-preview__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.doc-preview__btn--accent {
+  color: var(--primary-color);
+}
+
+.doc-preview__page-label,
+.doc-preview__zoom-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  min-width: 3.5rem;
+  text-align: center;
+}
+
+.doc-preview__zoom-label {
+  min-width: 2.75rem;
+}
+
+.doc-preview__stage {
+  position: relative;
+  height: 480px;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem;
+  background: #525659;
+}
+
+.doc-preview__status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin: auto;
+  color: #e5e7eb;
+  font-size: 0.85rem;
+}
+
+.doc-preview__status--error {
+  color: #fca5a5;
+}
+
+.doc-preview__spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Sized at render time to match the canvas; anchors the box overlays. */
+.doc-preview__page-wrap {
+  position: relative;
+  align-self: flex-start;
+  flex: 0 0 auto;
+  box-shadow: 0 2px 12px rgb(0 0 0 / 0.4);
+}
+
+.doc-preview__canvas {
+  display: block;
+}
+
+/* A grounding box drawn over the page. */
+.doc-box {
+  position: absolute;
+  border: 2px solid rgb(37 99 235 / 0.55);
+  background: rgb(37 99 235 / 0.1);
+  border-radius: 2px;
+  padding: 0;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.doc-box:hover {
+  background: rgb(37 99 235 / 0.2);
+  border-color: var(--primary-color);
+}
+
+.doc-box--active {
+  border-color: #f59e0b;
+  background: rgb(245 158 11 / 0.22);
+  box-shadow: 0 0 0 2px rgb(245 158 11 / 0.5);
+  z-index: 2;
+}
+
+.doc-box__tag {
+  position: absolute;
+  bottom: 100%;
+  left: -2px;
+  margin-bottom: 2px;
+  max-width: 220px;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.66rem;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #fff;
+  background: rgb(37 99 235 / 0.92);
+  border-radius: 3px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.doc-box:hover .doc-box__tag,
+.doc-box--active .doc-box__tag {
+  opacity: 1;
+}
+
+.doc-box--active .doc-box__tag {
+  background: #b45309;
+}
+
+/* Enlarge modal. */
+.doc-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: rgb(0 0 0 / 0.6);
+}
+
+.doc-modal__panel {
+  width: min(1100px, 95vw);
+  height: min(92vh, 1000px);
+  background: var(--surface);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 0.4);
+}
+
+.doc-preview--fullscreen {
+  height: 100%;
+}
+
+.doc-preview--fullscreen .doc-preview__stage {
+  height: auto;
+  flex: 1 1 auto;
+}
+

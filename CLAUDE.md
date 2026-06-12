@@ -46,17 +46,18 @@ npm run lint    # ESLint check (required before PR)
 Layered FastAPI service under `backend/app/`:
 
 - **`api/endpoints/`**: Thin route handlers per resource — `documents.py`, `contracts.py`, `parties.py`, `review.py`, `agents.py`, `system.py`
-- **`services/`**: Business logic — `landingai_service.py` (ADE API calls), `document_service.py` (upload/validation), `agent_service.py` (LangChain/LangGraph agents)
-- **`models/`**: SQLAlchemy ORM models; `ExtractionJob` persists extraction job state (status, parsed results) in PostgreSQL; `contract_parties` association table links Contracts ↔ Parties with a `role` field
-- **`schemas/`**: Pydantic schemas for request/response validation
+- **`services/`**: Business logic — `landingai_service.py` (ADE API calls + source-grounding reference resolution), `document_service.py` (upload/validation), `agent_service.py` (orchestrates the agents below), `party_matching.py` (rapidfuzz name normalization/splitting/scoring), `extraction_store.py` (thread-safe in-memory job-metadata store shared by the documents API and agents)
+- **`agents/`**: LangChain/LangGraph agent implementations — `guided_intake.py` (`GuidedContractIntakeAgent`), `contract_review.py` (`AutomatedContractReviewAgent`), `utils.py`. Invoked via `agent_service.py`
+- **`models/`**: SQLAlchemy ORM models; `ExtractionJob` persists extraction job state (status, parsed results) in PostgreSQL; `contract_parties` association table links Contracts ↔ Parties with a `role` field (e.g. "cedant", "reinsurer")
+- **`schemas/`**: Pydantic schemas for request/response validation — includes `extraction_schema.py` (the LandingAI Extract field schema) and `FieldSource`/`FieldSources` in `document.py` (per-field source grounding: page + normalized bounding box + verbatim chunk text)
 - **`core/config.py`**: All settings via `pydantic-settings`
 
 ### Frontend
 
 Vite + React under `frontend/src/`:
 
-- **`pages/`**: `Dashboard.tsx`, `UploadPage.tsx` (full upload→extract→review flow), `ContractsPage.tsx`, `PartiesPage.tsx`
-- **`components/`**: `FileUpload.tsx`, `ExtractionStatus.tsx` (polls job status), `ReviewForm.tsx`, `Layout.tsx`
+- **`pages/`**: `HomePage.tsx` (landing page at `/`), `Dashboard.tsx`, `UploadPage.tsx` (full upload→extract→review flow), `ContractsPage.tsx` + `ContractDetailPage.tsx`, `PartiesPage.tsx` + `PartyDetailPage.tsx`. `App.tsx` routes `/` to `HomePage`; all other routes render inside `Layout`
+- **`components/`**: `FileUpload.tsx`, `ExtractionStatus.tsx` (polls job status), `ReviewForm.tsx`, `Layout.tsx`, `DocumentPreview.tsx` (renders the source PDF to a `<canvas>` via pdf.js and overlays source-grounding bounding boxes), `SecondarySidebar.tsx` (contextual second sidebar portaled into a `Layout` slot, used by the review/source-grounding panel)
 - **`services/api.ts`**: Axios client — single source of truth for all backend calls
 - **`types/`**: TypeScript types mirroring backend Pydantic schemas
 - Use `@/*` path alias for imports instead of relative paths
@@ -65,9 +66,10 @@ Vite + React under `frontend/src/`:
 
 1. `POST /api/documents/upload` — saves file, starts LandingAI extraction job
 2. `GET /api/documents/status/{job_id}` — polled by `ExtractionStatus` until `completed`/`failed`
-3. `GET /api/documents/results/{job_id}` — returns parsed extraction data
-4. `POST /api/review/approve` — creates Contract + Party records from reviewed data
-5. `POST /api/agents/intake` / `POST /api/agents/review` — optional LangChain agent passes (requires `LLM_PROVIDER` config)
+3. `GET /api/documents/results/{job_id}` — returns parsed extraction data, including per-field `field_sources` (page + bounding box) for source grounding; `GET /api/documents/file/{job_id}` serves the original PDF that `DocumentPreview` overlays boxes onto
+4. `POST /api/parties/match` — fuzzy-matches extracted party names against existing Party records so reviewers can reuse rather than duplicate
+5. `POST /api/review/approve` — creates Contract + Party records from reviewed data
+6. `POST /api/agents/intake` / `POST /api/agents/review` — optional LangChain agent passes (requires `LLM_PROVIDER` config)
 
 ## Environment Variables
 
@@ -125,12 +127,15 @@ No frontend test runner is bundled. Keep `npm run lint` clean; document manual v
 |--------|------|---------|
 | POST | `/api/documents/upload` | Upload doc, start extraction |
 | GET | `/api/documents/status/{job_id}` | Poll extraction status |
-| GET | `/api/documents/results/{job_id}` | Fetch extraction results |
+| GET | `/api/documents/results/{job_id}` | Fetch extraction results (with `field_sources`) |
+| GET | `/api/documents/file/{job_id}` | Serve original uploaded PDF for preview |
+| DELETE | `/api/documents/{job_id}` | Delete a document / extraction job |
 | GET/POST | `/api/contracts/` | List / create contracts |
 | GET/PUT/DELETE | `/api/contracts/{id}` | Contract detail ops |
 | POST/DELETE | `/api/contracts/{id}/parties/{party_id}` | Link/unlink party |
 | GET/POST | `/api/parties/` | List / create parties |
 | GET/PUT/DELETE | `/api/parties/{id}` | Party detail ops |
+| POST | `/api/parties/match` | Fuzzy-match extracted names to existing parties |
 | GET | `/api/parties/search/by-name` | Name search |
 | POST | `/api/review/approve` | Approve extraction → create records |
 | POST | `/api/review/reject/{job_id}` | Reject extraction |

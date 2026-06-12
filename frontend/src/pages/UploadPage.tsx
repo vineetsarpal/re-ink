@@ -16,6 +16,26 @@ import type {
 
 type WorkflowStep = 'upload' | 'processing' | 'review';
 
+// PDFs bundled in `public/samples/`. Mock jobs carry no file on disk, so when a
+// mock scenario's filename matches a bundled sample we preview that copy — this
+// makes the source-grounded document view (bounding boxes) demonstrable offline.
+const BUNDLED_SAMPLES = new Set([
+  'excess-of-loss-reinsurance-agreement.pdf',
+  'quota-share-reinsurance-contract.pdf',
+]);
+
+/** Resolve the document URL for the review preview, real jobs and mock alike. */
+const resolveDocumentUrl = (
+  uploadResponse: DocumentUploadResponse | null,
+  isMockJob: boolean,
+  status: DocumentExtractionStatus | null,
+): string | null => {
+  if (!uploadResponse) return null;
+  if (!isMockJob) return documentApi.getFileUrl(uploadResponse.job_id);
+  const filename = status?.result?.extraction_metadata?.filename;
+  return filename && BUNDLED_SAMPLES.has(filename) ? `/samples/${filename}` : null;
+};
+
 export const UploadPage: React.FC = () => {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState<WorkflowStep>('upload');
@@ -25,6 +45,8 @@ export const UploadPage: React.FC = () => {
   const [extractionStatus, setExtractionStatus] =
     useState<DocumentExtractionStatus | null>(null);
   const [isSeedingMock, setIsSeedingMock] = useState(false);
+  // Mock jobs carry no file on disk, so the document preview is unavailable.
+  const [isMockJob, setIsMockJob] = useState(false);
   const [intakeAgent, setIntakeAgent] = useState<GuidedIntakeResponse | null>(null);
   const [isIntakeLoading, setIsIntakeLoading] = useState(false);
   const [intakeError, setIntakeError] = useState<string | null>(null);
@@ -33,6 +55,7 @@ export const UploadPage: React.FC = () => {
 
   const handleUploadSuccess = (response: DocumentUploadResponse) => {
     setUploadResponse(response);
+    setIsMockJob(false);
     setCurrentStep('processing');
     setIntakeAgent(null);
     setIntakeError(null);
@@ -87,6 +110,7 @@ export const UploadPage: React.FC = () => {
         status: status.status,
       };
       setUploadResponse(mockUpload);
+      setIsMockJob(true);
       setExtractionStatus(status);
       setCurrentStep(status.result ? 'review' : 'processing');
       setIntakeAgent(null);
@@ -231,6 +255,7 @@ export const UploadPage: React.FC = () => {
         {currentStep === 'review' && extractionStatus?.result && (
           <ReviewForm
             extractionResult={extractionStatus.result}
+            documentUrl={resolveDocumentUrl(uploadResponse, isMockJob, extractionStatus)}
             onApprove={handleApprove}
             onReject={handleReject}
             onCancel={handleCancel}

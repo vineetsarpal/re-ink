@@ -3,7 +3,9 @@ Service layer for integrating with LandingAI's ADE (Agentic Document Extraction)
 Uses the official landingai-ade SDK for document parsing and field extraction.
 
 """
+import html
 import logging
+import re
 from typing import Dict, Any, Optional
 from pathlib import Path
 from io import BytesIO
@@ -155,10 +157,18 @@ class LandingAIService:
             # The SDK returns a response object with a markdown attribute
             markdown = parse_response.markdown
 
-            logger.info(f"Parse completed. Markdown length: {len(markdown)}")
+            # Capture the per-chunk grounding (id, page, bounding box, markdown
+            # text). Extract's `extraction_metadata` references these chunk ids,
+            # so we must carry them forward to build source evidence later.
+            chunks = self._serialize_chunks(getattr(parse_response, "chunks", None))
+
+            logger.info(
+                f"Parse completed. Markdown length: {len(markdown)}, chunks: {len(chunks)}"
+            )
 
             return {
                 "markdown": markdown,
+                "chunks": chunks,
                 "metadata": {
                     "filename": file_path_obj.name,
                     "parse_model": model,
@@ -267,18 +277,42 @@ class LandingAIService:
         """
         try:
             extract_result = raw_results.get("extract_result", {})
+            parse_result = raw_results.get("parse_result", {})
             metadata = raw_results.get("metadata", {})
 
             # Debug logging to see actual structure
             logger.info(f"Raw results structure: {list(raw_results.keys())}")
             logger.info(f"Extract result structure: {list(extract_result.keys()) if extract_result else 'Empty'}")
 
-            # Process the extracted data
-            contract_data = self._process_contract_data(extract_result)
-            parties_data = self._process_parties_data(extract_result)
+            # --- Source grounding -------------------------------------------
+            # LandingAI's extract response carries a per-field `extraction_metadata`
+            # mapping (field -> {value, references:[chunk_id|cell_id, ...]}). Each
+            # reference points at a parse chunk (id, page, bounding box, markdown
+            # text). We resolve those into reviewer-facing source evidence.
+            #
+            # NB: this LandingAI key is unrelated to our own output
+            # `extraction_metadata` (processing metadata: filename, models).
+            chunk_index = self._build_chunk_index(parse_result.get("chunks"))
+            field_refs = extract_result.get("extraction_metadata") or {}
+            if isinstance(field_refs, dict) and "data" in field_refs and "extraction" not in field_refs:
+                # Some SDK shapes nest the per-field map under `data`.
+                field_refs = field_refs.get("data") or field_refs
+            field_sources: Dict[str, Any] = {"contract": {}, "parties": []}
+
+            # Process the extracted data (also records source evidence in-place)
+            contract_data = self._process_contract_data(
+                extract_result, field_refs, chunk_index, field_sources["contract"]
+            )
+            parties_data = self._process_parties_data(
+                extract_result, field_refs, chunk_index, field_sources["parties"]
+            )
 
             logger.info(f"Processed contract_data keys: {list(contract_data.keys()) if contract_data else 'Empty'}")
             logger.info(f"Processed parties_data count: {len(parties_data)}")
+            logger.info(
+                f"Source evidence: {len(field_sources['contract'])} contract fields, "
+                f"{sum(1 for p in field_sources['parties'] if p)} parties grounded"
+            )
 
             # Calculate confidence score if available
             confidence_score = extract_result.get("confidence", None)
@@ -286,6 +320,7 @@ class LandingAIService:
             return {
                 "contract_data": contract_data,
                 "parties_data": parties_data,
+                "field_sources": field_sources,
                 "confidence_score": confidence_score,
                 "extraction_metadata": metadata
             }
@@ -294,7 +329,13 @@ class LandingAIService:
             logger.error(f"Error parsing extraction results: {str(e)}", exc_info=True)
             raise
 
-    def _process_contract_data(self, extract_result: Dict[str, Any]) -> Dict[str, Any]:
+    def _process_contract_data(
+        self,
+        extract_result: Dict[str, Any],
+        field_refs: Optional[Dict[str, Any]] = None,
+        chunk_index: Optional[Dict[str, Any]] = None,
+        contract_sources: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """
         Map the Extract API response onto Contract DB columns.
 
@@ -303,8 +344,23 @@ class LandingAIService:
         numeric `*_amount` / `*_rate` fields map directly. Dates arrive as ISO
         strings thanks to the `date` type hint; we still pass them through
         _normalize_date defensively.
+
+        When `field_refs` and `chunk_index` are supplied, source evidence for
+        each populated column is recorded in `contract_sources`, keyed by the
+        *display* column name (e.g. `premium_description`), resolved from the
+        underlying schema field (e.g. `premium_text`).
         """
         contract_data: Dict[str, Any] = {}
+        field_refs = field_refs or {}
+        chunk_index = chunk_index or {}
+        if contract_sources is None:
+            contract_sources = {}
+
+        def record(display_name: str, schema_field: str) -> None:
+            """Resolve and store source evidence for one display column."""
+            source = self._resolve_source(schema_field, field_refs, chunk_index)
+            if source:
+                contract_sources[display_name] = source
 
         # Some SDKs wrap the payload; unwrap once if present.
         data = extract_result
@@ -320,9 +376,11 @@ class LandingAIService:
         # Identification
         if data.get("contract_name"):
             contract_data["contract_name"] = data["contract_name"]
+            record("contract_name", "contract_name")
 
         if data.get("contract_number"):
             contract_data["contract_number"] = data["contract_number"]
+            record("contract_number", "contract_number")
         elif data.get("contract_name"):
             import re
             contract_data["contract_number"] = re.sub(
@@ -332,17 +390,20 @@ class LandingAIService:
         for field in ("contract_type", "contract_sub_type", "contract_nature"):
             if data.get(field):
                 contract_data[field] = data[field]
+                record(field, field)
 
         # Period
         for date_field in ("effective_date", "expiration_date"):
             if data.get(date_field):
                 contract_data[date_field] = self._normalize_date(str(data[date_field]))
+                record(date_field, date_field)
 
         # Currency (default USD, validate ISO 4217 length)
         if data.get("currency"):
             currency = str(data["currency"]).upper().strip()
             if len(currency) == 3:
                 contract_data["currency"] = currency
+                record("currency", "currency")
         contract_data.setdefault("currency", "USD")
 
         # Financial terms — text/amount pairs map to description/amount columns
@@ -354,8 +415,10 @@ class LandingAIService:
         ):
             if data.get(text_key):
                 contract_data[desc_col] = data[text_key]
+                record(desc_col, text_key)
             if data.get(amount_key) is not None:
                 contract_data[amount_col] = self._clean_numeric_value(data[amount_key])
+                record(amount_col, amount_key)
 
         # Coverage & terms
         for field in (
@@ -367,6 +430,7 @@ class LandingAIService:
         ):
             if data.get(field):
                 contract_data[field] = data[field]
+                record(field, field)
 
         if len(contract_data) <= 1:
             logger.warning("No contract data was extracted from the document!")
@@ -374,17 +438,31 @@ class LandingAIService:
 
         return contract_data
 
-    def _process_parties_data(self, extract_result: Dict[str, Any]) -> list:
+    def _process_parties_data(
+        self,
+        extract_result: Dict[str, Any],
+        field_refs: Optional[Dict[str, Any]] = None,
+        chunk_index: Optional[Dict[str, Any]] = None,
+        party_sources: Optional[list] = None,
+    ) -> list:
         """
         Process extracted parties data from cedant and reinsurer fields.
 
         Args:
             extract_result: Raw extraction result from Extract API
+            field_refs: LandingAI per-field reference map (optional)
+            chunk_index: Resolved parse-chunk index (optional)
+            party_sources: List filled in lockstep with the returned parties so
+                each entry's source evidence aligns by index (optional)
 
         Returns:
             List of party dictionaries
         """
         parties_data = []
+        field_refs = field_refs or {}
+        chunk_index = chunk_index or {}
+        if party_sources is None:
+            party_sources = []
 
         # Check if data is nested
         data = extract_result
@@ -395,6 +473,11 @@ class LandingAIService:
 
         logger.info(f"Processing parties data from cedant/reinsurer fields")
 
+        def party_source(schema_field: str) -> Dict[str, Any]:
+            """Build the per-party source map (only the name is grounded)."""
+            source = self._resolve_source(schema_field, field_refs, chunk_index)
+            return {"name": source} if source else {}
+
         # Extract cedant
         if "cedant_name" in data and data["cedant_name"]:
             cedant = {
@@ -403,6 +486,7 @@ class LandingAIService:
                 "is_active": True,
             }
             parties_data.append(cedant)
+            party_sources.append(party_source("cedant_name"))
             logger.info(f"Processed cedant: {cedant['name']}")
 
         # Extract reinsurer
@@ -413,10 +497,128 @@ class LandingAIService:
                 "is_active": True,
             }
             parties_data.append(reinsurer)
+            party_sources.append(party_source("reinsurer_name"))
             logger.info(f"Processed reinsurer: {reinsurer['name']}")
 
         logger.info(f"Total parties processed: {len(parties_data)}")
         return parties_data
+
+    # ------------------------------------------------------------------ #
+    # Source grounding helpers
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _serialize_chunks(chunks: Any) -> list:
+        """
+        Normalise the parse response `chunks` into a list of plain dicts.
+
+        Each chunk carries `id`, `markdown`, `type`, and a `grounding`
+        ({page, box}). The SDK returns pydantic models; we model_dump them so
+        they survive JSONB persistence and re-parsing from stored raw_results.
+        """
+        result = []
+        for chunk in chunks or []:
+            if hasattr(chunk, "model_dump"):
+                result.append(chunk.model_dump())
+            elif isinstance(chunk, dict):
+                result.append(chunk)
+        return result
+
+    @staticmethod
+    def _clean_source_text(markdown: Optional[str]) -> Optional[str]:
+        """
+        Turn chunk markdown into reviewer-facing evidence text.
+
+        DPT chunk markdown embeds HTML artifacts — anchor tags like
+        ``<a id='...'></a>``, comments, table markup — that mean nothing to a
+        reviewer. Strip tags/comments, unescape entities, and collapse the
+        blank lines left behind.
+        """
+        if not markdown:
+            return markdown
+        text = re.sub(r"<!--.*?-->", "", markdown, flags=re.DOTALL)
+        text = re.sub(r"<[^>]+>", "", text)
+        text = html.unescape(text)
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+        return text or None
+
+    @staticmethod
+    def _build_chunk_index(chunks: Any) -> Dict[str, Dict[str, Any]]:
+        """
+        Index parse chunks by id for O(1) reference resolution.
+
+        Returns ``{chunk_id: {page_number, bbox, source_text}}``. Page numbers
+        from LandingAI are 0-indexed; we normalise to 1-indexed for display.
+        """
+        index: Dict[str, Dict[str, Any]] = {}
+        for chunk in chunks or []:
+            chunk_id = chunk.get("id")
+            if not chunk_id:
+                continue
+            grounding = chunk.get("grounding") or {}
+            page = grounding.get("page")
+            index[chunk_id] = {
+                "page_number": (page + 1) if isinstance(page, int) else None,
+                "bbox": grounding.get("box"),
+                "source_text": LandingAIService._clean_source_text(chunk.get("markdown")),
+            }
+        return index
+
+    @staticmethod
+    def _resolve_source(
+        schema_field: str,
+        field_refs: Dict[str, Any],
+        chunk_index: Dict[str, Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Resolve source evidence for one extracted field.
+
+        Looks up the field in LandingAI's per-field reference map and walks its
+        `references` (chunk ids, table-cell ids like ``"0-u"``, or element ids)
+        against the parse chunk index. Resolution is defensive:
+
+        - a reference that matches a chunk id  -> full evidence (text/page/box)
+        - an unresolved ``"{page}-{seq}"`` ref -> salvage the page number only
+        - no usable references                  -> ``None`` ("no source found")
+        """
+        meta = field_refs.get(schema_field) if isinstance(field_refs, dict) else None
+        if not isinstance(meta, dict):
+            return None
+
+        references = meta.get("references") or meta.get("chunk_references") or []
+        if isinstance(references, str):
+            references = [references]
+        value = meta.get("value")
+
+        salvaged_page: Optional[int] = None
+        for ref in references:
+            if ref in chunk_index:
+                resolved = chunk_index[ref]
+                return {
+                    "value": value,
+                    "source_text": resolved.get("source_text"),
+                    "page_number": resolved.get("page_number"),
+                    "chunk_id": ref,
+                    "bbox": resolved.get("bbox"),
+                    "confidence": meta.get("confidence"),
+                }
+            # Table-cell / element ids look like "{page}-{seq}" (0-indexed page).
+            if salvaged_page is None and isinstance(ref, str) and "-" in ref:
+                head = ref.split("-", 1)[0]
+                if head.isdigit():
+                    salvaged_page = int(head) + 1
+
+        if references:
+            # We have references but couldn't resolve full grounding — return a
+            # partial source so the reviewer still gets a page hint.
+            return {
+                "value": value,
+                "source_text": None,
+                "page_number": salvaged_page,
+                "chunk_id": references[0] if isinstance(references[0], str) else None,
+                "bbox": None,
+                "confidence": meta.get("confidence"),
+            }
+        return None
 
     @staticmethod
     def _normalize_date(date_str: str) -> str:
