@@ -49,7 +49,7 @@ npm run lint    # ESLint check (required before PR)
 Layered FastAPI service under `backend/app/`:
 
 - **`api/endpoints/`**: Thin route handlers per resource — `documents.py`, `contracts.py`, `parties.py`, `review.py`, `agents.py`, `system.py`
-- **`services/`**: Business logic — `landingai_service.py` (ADE API calls + source-grounding reference resolution), `document_service.py` (upload/validation), `agent_service.py` (orchestrates the agents below), `party_matching.py` (rapidfuzz name normalization/splitting/scoring), `extraction_store.py` (thread-safe in-memory job-metadata store shared by the documents API and agents)
+- **`services/`**: Business logic — `landingai_service.py` (ADE API calls + source-grounding reference resolution), `document_service.py` (upload/validation), `agent_service.py` (orchestrates the agents below), `party_matching.py` (rapidfuzz name normalization/splitting/scoring)
 - **`agents/`**: LangChain/LangGraph agent implementations — `guided_intake.py` (`GuidedContractIntakeAgent`), `contract_review.py` (`AutomatedContractReviewAgent`), `utils.py`. Invoked via `agent_service.py`
 - **`models/`**: SQLAlchemy ORM models; `ExtractionJob` persists extraction job state (status, parsed results) in PostgreSQL; `contract_parties` association table links Contracts ↔ Parties with a `role` field (e.g. "cedant", "reinsurer")
 - **`schemas/`**: Pydantic schemas for request/response validation — includes `extraction_schema.py` (the LandingAI Extract field schema) and `FieldSource`/`FieldSources` in `document.py` (per-field source grounding: page + normalized bounding box + verbatim chunk text)
