@@ -27,7 +27,7 @@ class Contract(Base):
     """
     __tablename__ = "contracts"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
 
     # Contract Identification
     contract_number = Column(String(100), unique=True, nullable=False, index=True)

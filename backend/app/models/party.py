@@ -16,7 +16,7 @@ class Party(Base):
     """
     __tablename__ = "parties"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
 
     # Basic Information
     name = Column(String(255), nullable=False, index=True)
