@@ -25,11 +25,14 @@ make bump-version V=1.2.3  # Bump version across VERSION, backend/VERSION, packa
 
 ```bash
 source venv/bin/activate
-alembic upgrade head                              # Apply migrations
+alembic upgrade head                              # Apply migrations (fresh DB) or advance to latest
+alembic stamp 0001_baseline                       # ONE-TIME: stamp existing DBs that predate Alembic
 alembic revision --autogenerate -m "description" # New migration
 pytest                                            # Run tests
 uvicorn app.main:app --reload                     # Dev server
 ```
+
+> **Note on schema management**: `Base.metadata.create_all()` is no longer called at startup — Alembic is the single source of schema truth. For a fresh database run `alembic upgrade head`. For an existing database that was previously created by `create_all()` (including production), run `alembic stamp 0001_baseline` once before running `alembic upgrade head`, so Alembic records the baseline without re-running DDL.
 
 ### Frontend (from `frontend/`)
 

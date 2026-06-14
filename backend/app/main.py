@@ -9,7 +9,6 @@ import logging
 
 from app.core.config import settings
 from app.api import api_router
-from app.db.database import engine, Base
 
 # Configure logging
 logging.basicConfig(
@@ -17,9 +16,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-
-# Create database tables
-Base.metadata.create_all(bind=engine)
 
 # Initialize FastAPI app
 app = FastAPI(
