@@ -21,6 +21,13 @@ jobs:
       - name: Inject VERSION into backend
         run: cp VERSION backend/VERSION
 
+      - name: Run database migrations
+        run: uv run alembic upgrade head
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+
       - name: Deploy
         run: uv run fastapi deploy
         working-directory: backend

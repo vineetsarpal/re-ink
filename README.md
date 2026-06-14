@@ -135,7 +135,10 @@ cp .env.example .env
 
 # Set up database
 createdb reink_db
-alembic upgrade head
+alembic upgrade head   # builds schema from migrations on a fresh DB
+
+# For an existing DB previously created by create_all() — stamp it first (one-time):
+# alembic stamp 0001_baseline && alembic upgrade head
 
 # Run server
 uvicorn app.main:app --reload
@@ -272,6 +275,7 @@ OLLAMA_MODEL=llama3.1
 - `LLM_PROVIDER` selects the agent LLM backend; set `AGENT_OFFLINE_MODE=true` to skip LLM calls entirely.
 - `ALLOWED_ORIGINS` supports JSON array notation (shown above) or a comma-separated list. In production, set this to your deployed frontend URL.
 - The app version is read from the `VERSION` file at the repo root — do not set `APP_VERSION` in `.env`.
+- **CI/CD**: The deploy workflow runs `alembic upgrade head` before deploying. The GitHub Actions secrets `DATABASE_URL` and `SECRET_KEY` must be configured in the repository settings for migrations to run in CI.
 
 ### Frontend (.env)
 ```env

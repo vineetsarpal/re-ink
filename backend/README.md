@@ -41,8 +41,11 @@ cp .env.example .env
 # Create PostgreSQL database
 createdb reink_db
 
-# Run migrations
+# Apply migrations (builds schema on a fresh DB)
 alembic upgrade head
+
+# For an existing DB previously created by create_all() — stamp it first (one-time):
+# alembic stamp 0001_baseline && alembic upgrade head
 ```
 
 ### Running the Server
@@ -117,13 +120,21 @@ backend/
 
 ## Database Migrations
 
+Alembic is the single source of schema truth — `Base.metadata.create_all()` is no longer called at app startup.
+
 Create a new migration:
 ```bash
 alembic revision --autogenerate -m "description"
 ```
 
-Apply migrations:
+Apply migrations (fresh DB, or advance to latest):
 ```bash
+alembic upgrade head
+```
+
+For an existing database that was previously created by `create_all()` (including the production Neon DB), stamp it once so Alembic records the baseline without re-running DDL:
+```bash
+alembic stamp 0001_baseline
 alembic upgrade head
 ```
 
@@ -131,6 +142,8 @@ Rollback:
 ```bash
 alembic downgrade -1
 ```
+
+CI/CD runs `alembic upgrade head` automatically before every deploy. The GitHub Actions secrets `DATABASE_URL` and `SECRET_KEY` must be set in the repository settings for this to work.
 
 ## Testing
 
