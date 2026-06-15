@@ -18,8 +18,10 @@ import {
   LayoutDashboard,
   Menu,
   PanelLeft,
+  LogOut,
   X,
 } from 'lucide-react';
+import { useAuth } from '@workos-inc/authkit-react';
 import { SecondarySidebarProvider } from '@/components/SecondarySidebar';
 import logoMark from '@/assets/logo.png';
 import logoWordmark from '@/assets/logo-wordmark.png';
@@ -37,6 +39,7 @@ const displayVersion = __APP_VERSION__.split('.').slice(0, 2).join('.');
 
 export const Layout: React.FC = () => {
   const location = useLocation();
+  const { user, signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(
     () => localStorage.getItem(NAV_COLLAPSED_KEY) === '1',
@@ -145,6 +148,42 @@ export const Layout: React.FC = () => {
         </ul>
 
         <div className="sidebar-footer">
+          {user && (
+            <>
+              <div
+                className="sidebar-user"
+                title={user.email ?? undefined}
+              >
+                {user.profilePictureUrl ? (
+                  <img
+                    src={user.profilePictureUrl}
+                    alt=""
+                    className="sidebar-user__avatar"
+                  />
+                ) : (
+                  <span className="sidebar-user__avatar sidebar-user__avatar--fallback">
+                    {(user.firstName?.[0] ?? user.email?.[0] ?? '?').toUpperCase()}
+                  </span>
+                )}
+                {!navCollapsed && (
+                  <span className="sidebar-user__name">
+                    {user.firstName
+                      ? `${user.firstName} ${user.lastName ?? ''}`.trim()
+                      : user.email}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                className="nav-link sign-out-btn"
+                onClick={() => signOut({ returnTo: window.location.origin })}
+                title={navCollapsed ? 'Sign out' : undefined}
+              >
+                <LogOut size={20} />
+                <span>Sign out</span>
+              </button>
+            </>
+          )}
           <p className="version-info">
             {navCollapsed ? `v${displayVersion}` : `Version ${displayVersion}`}
           </p>
