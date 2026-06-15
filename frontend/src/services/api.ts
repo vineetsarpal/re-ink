@@ -27,6 +27,46 @@ const api = axios.create({
   },
 });
 
+/**
+ * Auth bridge. The axios client lives outside React, but the WorkOS access
+ * token comes from the `authkit-react` hook inside React. `AuthBridge` registers
+ * the token getter (and a re-auth callback) here at mount; the interceptors below
+ * attach `Authorization: Bearer` to every request and trigger re-auth on 401.
+ */
+type TokenGetter = () => Promise<string | undefined>;
+let getAccessToken: TokenGetter | null = null;
+let onUnauthorized: (() => void) | null = null;
+
+export const registerAuth = (
+  tokenGetter: TokenGetter,
+  unauthorizedHandler: () => void,
+): void => {
+  getAccessToken = tokenGetter;
+  onUnauthorized = unauthorizedHandler;
+};
+
+api.interceptors.request.use(async (config) => {
+  if (getAccessToken) {
+    const token = await getAccessToken();
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
+});
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && onUnauthorized) {
+      // getAccessToken already auto-refreshes, so a 401 means the session is
+      // genuinely dead — re-authenticate rather than retry.
+      onUnauthorized();
+    }
+    return Promise.reject(error);
+  },
+);
+
 // Document APIs
 export const documentApi = {
   /**
