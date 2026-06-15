@@ -14,56 +14,53 @@ FastAPI backend for the re-ink reinsurance contract management system.
 
 ### Prerequisites
 
-- Python 3.9+
+- [uv](https://docs.astral.sh/uv/) (Python package & project manager)
+- Python 3.13+ (uv can install this for you)
 - PostgreSQL 12+
 
 ### Installation
 
-1. Create a virtual environment:
+Dependencies are managed with [uv](https://docs.astral.sh/uv/) (`pyproject.toml` + `uv.lock`). `uv sync` creates the `.venv` and installs the locked dependencies; `uv run` runs commands inside it, so there's no virtualenv to activate manually.
+
+1. Install dependencies:
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+uv sync   # creates .venv and installs deps (dev group included by default)
 ```
 
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-3. Set up environment variables:
+2. Set up environment variables:
 ```bash
 cp .env.example .env
 # Edit .env with your configuration
 ```
 
-4. Initialize the database:
+3. Initialize the database:
 ```bash
 # Create PostgreSQL database
 createdb reink_db
 
 # Apply migrations (builds schema on a fresh DB)
-alembic upgrade head
+uv run alembic upgrade head
 
 # For an existing DB previously created by create_all() — stamp it first (one-time):
-# alembic stamp 0001_baseline && alembic upgrade head
+# uv run alembic stamp 0001_baseline && uv run alembic upgrade head
 ```
 
 ### Running the Server
 
-Development mode with auto-reload:
+Development mode with auto-reload (entrypoint is configured under `[tool.fastapi]` in `pyproject.toml`):
 ```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uv run fastapi dev
 ```
 
-Or using Python directly:
+Production mode (no reload, binds 0.0.0.0):
 ```bash
-python -m app.main
+uv run fastapi run
 ```
 
-Quick start:
+Debugging with breakpoints:
 ```bash
 # Start debug server
-python run_debug.py
+uv run python run_debug.py
 
 # Then attach debugger from VS Code/Cursor (F5)
 ```
@@ -80,6 +77,7 @@ backend/
 ├── app/
 │   ├── api/              # API endpoints
 │   │   └── endpoints/    # Route handlers
+│   ├── agents/           # LangChain/LangGraph agent implementations
 │   ├── core/             # Core configuration
 │   ├── db/               # Database setup
 │   ├── models/           # SQLAlchemy models
@@ -88,7 +86,8 @@ backend/
 │   └── main.py           # FastAPI application
 ├── alembic/              # Database migrations
 ├── tests/                # Test files
-└── requirements.txt      # Python dependencies
+├── pyproject.toml        # Project metadata & dependencies (uv)
+└── uv.lock               # Pinned dependency lockfile
 ```
 
 ## API Endpoints
@@ -124,37 +123,37 @@ Alembic is the single source of schema truth — `Base.metadata.create_all()` is
 
 Create a new migration:
 ```bash
-alembic revision --autogenerate -m "description"
+uv run alembic revision --autogenerate -m "description"
 ```
 
 Apply migrations (fresh DB, or advance to latest):
 ```bash
-alembic upgrade head
+uv run alembic upgrade head
 ```
 
 For an existing database that was previously created by `create_all()` (including the production Neon DB), stamp it once so Alembic records the baseline without re-running DDL:
 ```bash
-alembic stamp 0001_baseline
-alembic upgrade head
+uv run alembic stamp 0001_baseline
+uv run alembic upgrade head
 ```
 
 Rollback:
 ```bash
-alembic downgrade -1
+uv run alembic downgrade -1
 ```
 
-CI/CD runs `alembic upgrade head` automatically before every deploy. The GitHub Actions secrets `DATABASE_URL` and `SECRET_KEY` must be set in the repository settings for this to work.
+CI/CD runs `uv run alembic upgrade head` automatically before every deploy. The GitHub Actions secrets `DATABASE_URL` and `SECRET_KEY` must be set in the repository settings for this to work.
 
 ## Testing
 
 Run tests:
 ```bash
-pytest
+uv run pytest
 ```
 
 With coverage:
 ```bash
-pytest --cov=app tests/
+uv run pytest --cov=app tests/
 ```
 
 ## Configuration
@@ -183,5 +182,5 @@ env | grep DEBUG
 
 # If found, unset it before running
 unset DEBUG
-uvicorn app.main:app --reload
+uv run fastapi dev
 ```

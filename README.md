@@ -112,22 +112,21 @@ Use `make backend-dev` or `make frontend-dev` to run either side individually, a
 
 ### Prerequisites
 
-- Python 3.9+
+- [uv](https://docs.astral.sh/uv/) (Python package & project manager)
+- Python 3.13+ (uv can install this for you)
 - Node.js 18+
 - PostgreSQL 12+
 - LandingAI API key
 
 ### Backend Setup
 
+Dependencies are managed with [uv](https://docs.astral.sh/uv/) (`pyproject.toml` + `uv.lock`). `uv sync` creates the `.venv` and installs the locked dependencies; `uv run` executes commands inside it, so there's no virtualenv to activate manually.
+
 ```bash
 cd backend
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies (creates .venv; dev group included by default)
+uv sync
 
 # Configure environment
 cp .env.example .env
@@ -135,13 +134,13 @@ cp .env.example .env
 
 # Set up database
 createdb reink_db
-alembic upgrade head   # builds schema from migrations on a fresh DB
+uv run alembic upgrade head   # builds schema from migrations on a fresh DB
 
 # For an existing DB previously created by create_all() — stamp it first (one-time):
-# alembic stamp 0001_baseline && alembic upgrade head
+# uv run alembic stamp 0001_baseline && uv run alembic upgrade head
 
-# Run server
-uvicorn app.main:app --reload
+# Run server (auto-reload; entrypoint is configured in pyproject.toml)
+uv run fastapi dev
 # or use: make backend-dev
 ```
 
@@ -275,7 +274,7 @@ OLLAMA_MODEL=llama3.1
 - `LLM_PROVIDER` selects the agent LLM backend; set `AGENT_OFFLINE_MODE=true` to skip LLM calls entirely.
 - `ALLOWED_ORIGINS` supports JSON array notation (shown above) or a comma-separated list. In production, set this to your deployed frontend URL.
 - The app version is read from the `VERSION` file at the repo root — do not set `APP_VERSION` in `.env`.
-- **CI/CD**: The deploy workflow runs `alembic upgrade head` before deploying. The GitHub Actions secrets `DATABASE_URL` and `SECRET_KEY` must be configured in the repository settings for migrations to run in CI.
+- **CI/CD**: The deploy workflow runs `uv run alembic upgrade head` before deploying. The GitHub Actions secrets `DATABASE_URL` and `SECRET_KEY` must be configured in the repository settings for migrations to run in CI.
 
 ### Frontend (.env)
 ```env

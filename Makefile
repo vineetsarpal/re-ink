@@ -8,13 +8,13 @@ FRONTEND_DIR := frontend
 setup: backend-install frontend-install sync-version ## Install backend + frontend dependencies
 
 backend-install: ## Install backend Python dependencies via uv
-	cd $(BACKEND_DIR) && uv sync --group dev
+	cd $(BACKEND_DIR) && uv sync
 
 frontend-install: ## Install frontend npm dependencies
 	cd $(FRONTEND_DIR) && npm install
 
 backend-dev: ## Run the FastAPI dev server with auto-reload
-	cd $(BACKEND_DIR) && uv run uvicorn app.main:app --reload
+	cd $(BACKEND_DIR) && uv run fastapi dev
 
 frontend-dev: ## Run the Vite dev server
 	cd $(FRONTEND_DIR) && npm run dev -- --host

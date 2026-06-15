@@ -15,7 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 make setup          # Install backend + frontend dependencies (also runs sync-version)
 make dev            # Launch both dev servers concurrently (Ctrl+C stops both)
-make backend-dev    # Backend only (uvicorn --reload, port 8000)
+make backend-dev    # Backend only (fastapi dev, auto-reload, port 8000)
 make frontend-dev   # Frontend only (vite --host, port 3000)
 make sync-version   # Copy root VERSION → backend/VERSION (needed for local dev)
 make bump-version V=1.2.3  # Bump version across VERSION, backend/VERSION, package.json
@@ -23,13 +23,15 @@ make bump-version V=1.2.3  # Bump version across VERSION, backend/VERSION, packa
 
 ### Backend (from `backend/`)
 
+Dependencies are managed with [uv](https://docs.astral.sh/uv/) (`pyproject.toml` + `uv.lock`); requires Python 3.13+. `uv run` executes commands inside the project venv (`.venv`), so no manual activation is needed.
+
 ```bash
-source venv/bin/activate
-alembic upgrade head                              # Apply migrations (fresh DB) or advance to latest
-alembic stamp 0001_baseline                       # ONE-TIME: stamp existing DBs that predate Alembic
-alembic revision --autogenerate -m "description" # New migration
-pytest                                            # Run tests
-uvicorn app.main:app --reload                     # Dev server
+uv sync                                              # Install/sync deps into .venv (dev group included by default)
+uv run alembic upgrade head                          # Apply migrations (fresh DB) or advance to latest
+uv run alembic stamp 0001_baseline                   # ONE-TIME: stamp existing DBs that predate Alembic
+uv run alembic revision --autogenerate -m "description" # New migration
+uv run pytest                                        # Run tests
+uv run uvicorn app.main:app --reload                 # Dev server
 ```
 
 > **Note on schema management**: `Base.metadata.create_all()` is no longer called at startup — Alembic is the single source of schema truth. For a fresh database run `alembic upgrade head`. For an existing database that was previously created by `create_all()` (including production), run `alembic stamp 0001_baseline` once before running `alembic upgrade head`, so Alembic records the baseline without re-running DDL.
@@ -118,8 +120,8 @@ The root `VERSION` file is the single source of truth for the app version.
 ## Testing
 
 ```bash
-cd backend && pytest                    # All backend tests
-cd backend && pytest tests/test_mock_agents.py  # Single file
+cd backend && uv run pytest                    # All backend tests
+cd backend && uv run pytest tests/test_mock_agents.py  # Single file
 ```
 
 No frontend test runner is bundled. Keep `npm run lint` clean; document manual verification in PRs.
