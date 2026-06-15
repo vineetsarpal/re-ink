@@ -14,6 +14,7 @@
     "@hookform/resolvers": "^3.3.2",
     "@tanstack/react-query": "^5.12.2",
     "@tanstack/react-table": "^8.10.7",
+    "@workos-inc/authkit-react": "^0.16.1",
     "axios": "^1.6.2",
     "date-fns": "^3.0.0",
     "lucide-react": "^0.294.0",
