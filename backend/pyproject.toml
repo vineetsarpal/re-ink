@@ -32,8 +32,8 @@ dependencies = [
     # Fuzzy matching for party deduplication
     "rapidfuzz>=3.0.0",
     # Auth & security
+    # python-jose validates WorkOS access tokens (RS256 via JWKS).
     "python-jose[cryptography]==3.3.0",
-    "passlib[bcrypt]==1.7.4",
     "python-dotenv>=1.0.0",
     # CORS
     "fastapi-cors>=0.0.6",

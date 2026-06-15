@@ -19,6 +19,7 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from app.main import app  # noqa: E402
 from app.db.database import Base, get_db  # noqa: E402
+from app.core.auth import CurrentUser, get_current_user  # noqa: E402
 
 
 client: TestClient | None = None
@@ -47,6 +48,9 @@ def setup_module(_: object) -> None:
             db.close()
 
     app.dependency_overrides[get_db] = get_test_db
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        user_id="test-user", session_id="test-session"
+    )
     client = TestClient(app)
 
 
@@ -57,6 +61,7 @@ def teardown_module(_: object) -> None:
         client.close()
         client = None
     app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(get_current_user, None)
     if test_engine is not None:
         test_engine.dispose()
         test_engine = None

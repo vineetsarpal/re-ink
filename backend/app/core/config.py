@@ -30,10 +30,16 @@ class Settings(BaseSettings):
     APP_NAME: str = "re-ink"
     APP_VERSION: str = _read_version()
     DEBUG: bool = False
-    SECRET_KEY: str
 
     # Database
     DATABASE_URL: str
+
+    # WorkOS Authentication
+    # The issuer and JWKS URL for access-token validation are derived from the
+    # client id. The API key is only needed for server-side WorkOS API calls
+    # (not used in the auth slice), so it defaults to empty.
+    WORKOS_CLIENT_ID: str = ""
+    WORKOS_API_KEY: str = ""
 
     # LandingAI Configuration
     LANDINGAI_API_KEY: str = ""
@@ -67,9 +73,6 @@ class Settings(BaseSettings):
     # Note: In .env file, use JSON format: ALLOWED_ORIGINS=["http://localhost:3000","http://localhost:5173"]
     ALLOWED_ORIGINS: List[str] = Field(default=["http://localhost:3000", "http://localhost:5173"])
 
-    # Security
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-
     # Logging
     LOG_LEVEL: str = "INFO"
 
@@ -77,6 +80,9 @@ class Settings(BaseSettings):
         env_file=".env",
         case_sensitive=True,
         env_ignore_empty=True,
+        # Ignore unknown env vars so retired settings (e.g. a lingering
+        # SECRET_KEY in CI / deploy envs) don't break startup.
+        extra="ignore",
     )
 
 
