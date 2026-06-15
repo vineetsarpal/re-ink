@@ -149,3 +149,17 @@ No frontend test runner is bundled. Keep `npm run lint` clean; document manual v
 | GET | `/api/system/config` | Agent config flags for frontend |
 
 API docs available at `http://localhost:8000/docs` when the backend is running.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs live as GitHub issues in `vineetsarpal/re-ink`; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical triage roles, default names (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
