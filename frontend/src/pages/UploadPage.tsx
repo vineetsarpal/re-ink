@@ -3,7 +3,6 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
 import { FileUpload } from '@/components/FileUpload';
 import { ExtractionStatus } from '@/components/ExtractionStatus';
 import { ReviewForm } from '@/components/ReviewForm';
@@ -182,10 +181,6 @@ export const UploadPage: React.FC = () => {
   return (
     <div className="upload-page">
       <div className="page-header">
-        <button onClick={() => navigate('/dashboard')} className="btn-back">
-          <ArrowLeft size={20} />
-          Back to Dashboard
-        </button>
         <h1>Upload Contract Document</h1>
       </div>
 

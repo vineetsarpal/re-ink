@@ -3,10 +3,13 @@
  */
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@workos-inc/authkit-react';
 import { FileText, Sparkles, Upload, CheckCircle, ArrowRight, Bot } from 'lucide-react';
 
 export const HomePage: React.FC = () => {
   const navigate = useNavigate();
+  const { isLoading, user } = useAuth();
+  const isSignedIn = Boolean(user);
 
   return (
     <div className="home-page">
@@ -24,7 +27,8 @@ export const HomePage: React.FC = () => {
           </h1>
           <p className="hero-description">
             re-ink transforms complex reinsurance document processing with AI-powered extraction.
-            Upload contracts, extract key fields automatically, and manage your reinsurance portfolio with ease.
+            Upload contracts, cover notes, and more. Extract key fields automatically,
+            and manage your reinsurance portfolio with ease.
           </p>
           <div className="hero-actions">
             <button
@@ -32,14 +36,16 @@ export const HomePage: React.FC = () => {
               className="btn btn-primary btn-large"
             >
               <Upload size={20} />
-              Upload Contract
-              <ArrowRight size={20} />
+              Upload
             </button>
             <button
-              onClick={() => navigate('/dashboard')}
-              className="btn btn-secondary btn-large"
+              onClick={() => navigate(isSignedIn ? '/dashboard' : '/login')}
+              className={`btn btn-large ${
+                isSignedIn ? 'btn-secondary' : 'btn-secondary hero-sign-in-btn'
+              }`}
+              disabled={isLoading}
             >
-              View Dashboard
+              {isSignedIn ? 'Go to Dashboard' : 'Sign in'}
             </button>
           </div>
         </div>

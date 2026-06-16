@@ -2131,13 +2131,14 @@ tbody tr:last-child td {
    ============================================ */
 
 .home-page {
-  max-width: 1200px;
-  margin: 0 auto;
+  width: 100%;
   padding: 0;
 }
 
 /* Hero Section */
 .hero-section {
+  max-width: 1200px;
+  margin: 0 auto;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4rem;
@@ -2194,6 +2195,19 @@ tbody tr:last-child td {
   display: flex;
   gap: 1rem;
   flex-wrap: wrap;
+}
+
+.hero-sign-in-btn {
+  border-color: rgba(59, 130, 246, 0.45);
+  color: var(--primary-color);
+  background: var(--surface);
+  box-shadow: none;
+}
+
+.hero-sign-in-btn:hover:not(:disabled) {
+  border-color: var(--primary-color);
+  background: rgba(59, 130, 246, 0.06);
+  box-shadow: none;
 }
 
 .btn-large {
