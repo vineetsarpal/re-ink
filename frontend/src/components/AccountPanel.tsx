@@ -41,6 +41,8 @@ const WIDGET_THEME: WorkOsWidgetsProps['theme'] = {
   fontFamily: 'inherit',
 };
 
+const apiHostname = import.meta.env.VITE_WORKOS_API_HOSTNAME as string | undefined;
+
 export const AccountPanel: React.FC<AccountPanelProps> = ({ open, onClose }) => {
   const [tab, setTab] = useState<Tab>('profile');
 
@@ -122,7 +124,7 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({ open, onClose }) => 
           )}
 
           {authToken && (
-            <WorkOsWidgets theme={WIDGET_THEME}>
+            <WorkOsWidgets theme={WIDGET_THEME} apiHostname={apiHostname}>
               {tab === 'profile' && <UserProfile authToken={authToken} />}
               {tab === 'security' && <UserSecurity authToken={authToken} />}
               {/* Fetcher form avoids needing the current session id. */}

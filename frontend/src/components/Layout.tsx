@@ -24,8 +24,8 @@ import {
 import { useAuth } from '@workos-inc/authkit-react';
 import { SecondarySidebarProvider } from '@/components/SecondarySidebar';
 import { AccountPanel } from '@/components/AccountPanel';
-import logoMark from '@/assets/logo.png';
-import logoWordmark from '@/assets/logo-wordmark.png';
+import logoMark from '@/assets/logo-mark-small.png';
+import logoWordmark from '@/assets/logo-wordmark-small.png';
 
 const NAV_COLLAPSED_KEY = 'reink-nav-collapsed';
 
@@ -43,6 +43,7 @@ export const Layout: React.FC = () => {
   const { user, signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(
     () => localStorage.getItem(NAV_COLLAPSED_KEY) === '1',
   );
@@ -61,6 +62,15 @@ export const Layout: React.FC = () => {
     });
   };
 
+  const handleSignOut = () => {
+    setSignOutConfirmOpen(true);
+  };
+
+  const confirmSignOut = () => {
+    setSignOutConfirmOpen(false);
+    signOut({ returnTo: window.location.origin });
+  };
+
   // Close the drawer whenever the route changes.
   useEffect(() => {
     setMobileOpen(false);
@@ -75,6 +85,15 @@ export const Layout: React.FC = () => {
       document.body.style.overflow = prev;
     };
   }, [mobileOpen]);
+
+  useEffect(() => {
+    if (!signOutConfirmOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSignOutConfirmOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [signOutConfirmOpen]);
 
   return (
     <div className={`app-layout ${mobileOpen ? 'app-layout--drawer-open' : ''}`}>
@@ -114,24 +133,39 @@ export const Layout: React.FC = () => {
         aria-hidden={mobileOpen ? false : undefined}
       >
         <div className="sidebar-header">
-          <Link to="/" className="logo-link" title={navCollapsed ? 're-ink' : undefined}>
-            {/* Collapsed rail shows the bare mark; expanded shows the full lockup. */}
-            <img className="logo-mark" src={logoMark} alt="re-ink" />
-            <div className="logo-text">
-              <img className="logo-lockup" src={logoWordmark} alt="re-ink" />
-              <p className="app-subtitle">AI-Powered Reinsurance</p>
+          {navCollapsed ? (
+            <div className="collapsed-logo-control">
+              <img className="logo-mark" src={logoMark} alt="re-ink" />
+              <button
+                type="button"
+                className="sidebar-toggle sidebar-toggle--collapsed"
+                onClick={toggleNav}
+                aria-label="Expand sidebar"
+                aria-expanded={false}
+                title="Expand sidebar"
+              >
+                <PanelLeft size={18} />
+              </button>
             </div>
-          </Link>
-          <button
-            type="button"
-            className="sidebar-toggle"
-            onClick={toggleNav}
-            aria-label={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            aria-expanded={!navCollapsed}
-            title={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            <PanelLeft size={18} />
-          </button>
+          ) : (
+            <>
+              <Link to="/" className="logo-link">
+                <div className="logo-text">
+                  <img className="logo-lockup" src={logoWordmark} alt="re-ink" />
+                </div>
+              </Link>
+              <button
+                type="button"
+                className="sidebar-toggle"
+                onClick={toggleNav}
+                aria-label="Collapse sidebar"
+                aria-expanded={true}
+                title="Collapse sidebar"
+              >
+                <PanelLeft size={18} />
+              </button>
+            </>
+          )}
         </div>
 
         <ul className="nav-menu">
@@ -182,7 +216,7 @@ export const Layout: React.FC = () => {
               <button
                 type="button"
                 className="nav-link sign-out-btn"
-                onClick={() => signOut({ returnTo: window.location.origin })}
+                onClick={handleSignOut}
                 title={navCollapsed ? 'Sign out' : undefined}
               >
                 <LogOut size={20} />
@@ -218,6 +252,44 @@ export const Layout: React.FC = () => {
       </main>
 
       <AccountPanel open={accountOpen} onClose={() => setAccountOpen(false)} />
+
+      {signOutConfirmOpen && (
+        <div
+          className="confirm-modal"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="sign-out-confirm-title"
+          aria-describedby="sign-out-confirm-description"
+          onClick={() => setSignOutConfirmOpen(false)}
+        >
+          <div className="confirm-modal__panel" onClick={(e) => e.stopPropagation()}>
+            <div className="confirm-modal__icon" aria-hidden="true">
+              <LogOut size={22} />
+            </div>
+            <div className="confirm-modal__content">
+              <h2 id="sign-out-confirm-title" className="confirm-modal__title">
+                Sign out?
+              </h2>
+              <p id="sign-out-confirm-description" className="confirm-modal__description">
+                You'll need to sign in again to access your contracts, parties, and
+                document review workspace.
+              </p>
+            </div>
+            <div className="confirm-modal__actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setSignOutConfirmOpen(false)}
+              >
+                Cancel
+              </button>
+              <button type="button" className="btn btn-danger" onClick={confirmSignOut}>
+                Sign out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
