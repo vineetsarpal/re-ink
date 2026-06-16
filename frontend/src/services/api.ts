@@ -131,6 +131,19 @@ export const documentApi = {
   },
 };
 
+// Widget APIs
+export const widgetApi = {
+  /**
+   * Mint a short-lived WorkOS User Profile widget token for the signed-in user.
+   * The backend brokers this with its WORKOS_API_KEY; the SPA access token alone
+   * can't authorize the widget.
+   */
+  getUserProfileToken: async (): Promise<string> => {
+    const response = await api.post<{ token: string }>('/widgets/user-profile/token');
+    return response.data.token;
+  },
+};
+
 // System APIs
 export const systemApi = {
   /**

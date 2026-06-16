@@ -147,6 +147,7 @@ No frontend test runner is bundled. Keep `npm run lint` clean; document manual v
 | POST | `/api/agents/intake` | Guided intake agent |
 | POST | `/api/agents/review` | Automated contract review agent |
 | GET | `/api/system/config` | Agent config flags for frontend |
+| POST | `/api/widgets/user-profile/token` | Mint a WorkOS User Profile widget token for the current user |
 
 API docs available at `http://localhost:8000/docs` when the backend is running.
 

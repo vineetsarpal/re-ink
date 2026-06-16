@@ -9,7 +9,7 @@
  *                   module-level axios client (see services/api.ts).
  */
 import React, { useEffect } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@workos-inc/authkit-react';
 import { registerAuth } from '@/services/api';
 
@@ -30,17 +30,49 @@ const Loading: React.FC<{ label: string }> = ({ label }) => (
 /** Gate a protected route group: redirect to hosted sign-in when unauthenticated. */
 export const RequireAuth: React.FC = () => {
   const { isLoading, user, signIn } = useAuth();
+  const location = useLocation();
+  const signInStartedRef = React.useRef(false);
 
   useEffect(() => {
-    if (!isLoading && !user) {
-      signIn();
+    if (!isLoading && !user && !signInStartedRef.current) {
+      signInStartedRef.current = true;
+      void signIn({
+        state: {
+          returnTo: `${location.pathname}${location.search}${location.hash}`,
+        },
+      });
     }
-  }, [isLoading, user, signIn]);
+  }, [isLoading, location.hash, location.pathname, location.search, user, signIn]);
 
   if (isLoading || !user) {
     return <Loading label="Loading…" />;
   }
   return <Outlet />;
+};
+
+/** WorkOS sign-in endpoint route; starts hosted auth when WorkOS lands here. */
+export const LoginRoute: React.FC = () => {
+  const { isLoading, user, signIn } = useAuth();
+  const navigate = useNavigate();
+  const signInStartedRef = React.useRef(false);
+
+  useEffect(() => {
+    if (isLoading) {
+      return;
+    }
+
+    if (user) {
+      navigate('/dashboard', { replace: true });
+      return;
+    }
+
+    if (!signInStartedRef.current) {
+      signInStartedRef.current = true;
+      void signIn({ state: { returnTo: '/dashboard' } });
+    }
+  }, [isLoading, user, navigate, signIn]);
+
+  return <Loading label="Redirecting…" />;
 };
 
 /** Landing route for the WorkOS redirect URI; routes onward once auth resolves. */

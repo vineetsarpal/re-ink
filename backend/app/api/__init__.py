@@ -1,7 +1,7 @@
 """API router configuration."""
 from fastapi import APIRouter, Depends
 
-from app.api.endpoints import agents, contracts, parties, documents, review, system
+from app.api.endpoints import agents, contracts, parties, documents, review, system, widgets
 from app.core.auth import get_current_user
 
 api_router = APIRouter()
@@ -45,5 +45,11 @@ api_router.include_router(
     system.router,
     prefix="/system",
     tags=["system"],
+    dependencies=_auth,
+)
+api_router.include_router(
+    widgets.router,
+    prefix="/widgets",
+    tags=["widgets"],
     dependencies=_auth,
 )

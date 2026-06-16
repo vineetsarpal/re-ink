@@ -37,6 +37,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     # CORS
     "fastapi-cors>=0.0.6",
+    "workos>=8.0.0",
 ]
 
 [dependency-groups]
