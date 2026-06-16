@@ -17,6 +17,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Loud startup signal for the most common prod misconfig: without a client id,
+# the issuer/JWKS can't be derived and every authenticated request 401s.
+if not settings.WORKOS_CLIENT_ID:
+    logger.warning(
+        "WORKOS_CLIENT_ID is not set — every authenticated /api request will be "
+        "rejected with 401. Set it to your WorkOS environment's client id."
+    )
+
 # Initialize FastAPI app
 app = FastAPI(
     title=settings.APP_NAME,
@@ -73,7 +81,9 @@ async def health_check():
     return {
         "status": "healthy",
         "app_name": settings.APP_NAME,
-        "version": settings.APP_VERSION
+        "version": settings.APP_VERSION,
+        # Non-secret config visibility: lets you confirm prod auth config via curl.
+        "workos_client_id_configured": bool(settings.WORKOS_CLIENT_ID),
     }
 
 
