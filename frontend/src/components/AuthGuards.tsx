@@ -25,11 +25,9 @@ const Loading: React.FC<{ label: string }> = ({ label }) => (
   <div style={center}>{label}</div>
 );
 
-// Cross-redirect loop breaker. The per-mount ref resets on every reload, so a
-// failing sign-in (e.g. WorkOS rate-limit / bootstrap failure) would redirect
-// forever. We persist the attempt time in sessionStorage: if we return from a
-// sign-in still unauthenticated within the window, we stop and show an error
-// instead of redirecting again.
+// Loop breaker: the per-mount ref resets on reload, so a failing sign-in could
+// redirect forever. Persist the attempt; if we return still unauthenticated
+// within the window, stop and show an error instead of redirecting again.
 const SIGNIN_ATTEMPT_KEY = 'reink:signin-attempt-at';
 const SIGNIN_LOOP_WINDOW_MS = 20_000;
 
