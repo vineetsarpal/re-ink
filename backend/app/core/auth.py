@@ -11,6 +11,7 @@ required for validation (the JWKS endpoint is public).
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -21,6 +22,8 @@ from jose import jwt
 from jose.exceptions import JWTError
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 _ALGORITHMS = ["RS256"]
 
@@ -87,6 +90,17 @@ def decode_and_validate(token: str) -> CurrentUser:
             issuer=_issuer(),
         )
     except (JWTError, AuthError, KeyError) as exc:
+        # Log *why* a token was rejected. The common prod cause is a
+        # WORKOS_CLIENT_ID mismatch — the issuer check then fails for every
+        # token — so surface expected vs. actual issuer.
+        try:
+            token_iss = jwt.get_unverified_claims(token).get("iss")
+        except Exception:
+            token_iss = "<unparseable>"
+        logger.warning(
+            "Access token rejected (%s): %s | expected issuer=%s token issuer=%s",
+            type(exc).__name__, exc, _issuer(), token_iss,
+        )
         raise AuthError(str(exc)) from exc
 
     return CurrentUser(
