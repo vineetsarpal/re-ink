@@ -250,8 +250,9 @@ re-ink/
 
 ### Backend (.env)
 ```env
-SECRET_KEY=your_secret_key
 DATABASE_URL=postgresql://user:password@localhost:5432/reink_db
+WORKOS_CLIENT_ID=client_...
+WORKOS_API_KEY=sk_...             # Optional; not needed for access-token validation
 LANDINGAI_API_KEY=your_landingai_api_key   # Optional — users can supply their own key in the UI (BYOK)
 LANDINGAI_PARSE_URL=https://api.va.landing.ai/v1/ade/parse
 LANDINGAI_EXTRACT_URL=https://api.va.landing.ai/v1/ade/extract
@@ -271,14 +272,17 @@ OLLAMA_MODEL=llama3.1
 ```
 
 - `LANDINGAI_API_KEY` is optional on the server — users can enter their own key directly in the Upload UI (BYOK). If neither is set, the upload will be rejected with a clear error.
+- `WORKOS_CLIENT_ID` drives WorkOS issuer and JWKS validation for protected API routes.
 - `LLM_PROVIDER` selects the agent LLM backend; set `AGENT_OFFLINE_MODE=true` to skip LLM calls entirely.
 - `ALLOWED_ORIGINS` supports JSON array notation (shown above) or a comma-separated list. In production, set this to your deployed frontend URL.
 - The app version is read from the `VERSION` file at the repo root — do not set `APP_VERSION` in `.env`.
-- **CI/CD**: The deploy workflow runs `uv run alembic upgrade head` before deploying. The GitHub Actions secrets `DATABASE_URL` and `SECRET_KEY` must be configured in the repository settings for migrations to run in CI.
+- **CI/CD**: The deploy workflow runs `uv run alembic upgrade head` before deploying. The GitHub Actions secret `DATABASE_URL` must be configured in the repository settings for migrations to run in CI.
 
 ### Frontend (.env)
 ```env
 VITE_API_BASE_URL=http://localhost:8000/api
+VITE_WORKOS_CLIENT_ID=client_...
+VITE_WORKOS_REDIRECT_URI=http://localhost:3000/auth/callback
 ```
 
 ## License

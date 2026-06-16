@@ -142,7 +142,7 @@ Rollback:
 uv run alembic downgrade -1
 ```
 
-CI/CD runs `uv run alembic upgrade head` automatically before every deploy. The GitHub Actions secrets `DATABASE_URL` and `SECRET_KEY` must be set in the repository settings for this to work.
+CI/CD runs `uv run alembic upgrade head` automatically before every deploy. The GitHub Actions secret `DATABASE_URL` must be set in the repository settings for this to work.
 
 ## Testing
 
@@ -161,12 +161,13 @@ uv run pytest --cov=app tests/
 Key environment variables:
 
 - `DATABASE_URL` - PostgreSQL connection string
+- `WORKOS_CLIENT_ID` - WorkOS client ID used to derive token issuer and JWKS URL
+- `WORKOS_API_KEY` - Optional WorkOS API key for server-side WorkOS calls; not required for access-token validation
 - `LANDINGAI_API_KEY` - LandingAI API key
 - `LANDINGAI_PARSE_URL` - LandingAI Parse API endpoint (default: https://api.va.landing.ai/v1/ade/parse)
 - `LANDINGAI_EXTRACT_URL` - LandingAI Extract API endpoint (default: https://api.va.landing.ai/v1/ade/extract)
 - `LANDINGAI_PARSE_MODEL` - Parse model version (default: dpt-2-latest)
 - `LANDINGAI_EXTRACT_MODEL` - Extract model version (default: extract-latest)
-- `SECRET_KEY` - Application secret key
 - `DEBUG` - Enable debug mode (default: False)
 - `LOG_LEVEL` - Logging level (default: INFO)
 - `MAX_UPLOAD_SIZE` - Maximum file upload size (bytes)

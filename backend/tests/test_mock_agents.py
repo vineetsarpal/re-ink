@@ -4,7 +4,6 @@ from pathlib import Path
 
 # Configure environment before importing application modules
 TEST_DB_PATH = Path("test_agents.db")
-os.environ["SECRET_KEY"] = "test-secret"
 os.environ["LANDINGAI_API_KEY"] = "dummy-key"
 os.environ["DATABASE_URL"] = f"sqlite:///./{TEST_DB_PATH.name}"
 os.environ["AGENT_OFFLINE_MODE"] = "true"

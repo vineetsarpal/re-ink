@@ -80,8 +80,8 @@ class Settings(BaseSettings):
         env_file=".env",
         case_sensitive=True,
         env_ignore_empty=True,
-        # Ignore unknown env vars so retired settings (e.g. a lingering
-        # SECRET_KEY in CI / deploy envs) don't break startup.
+        # Ignore unknown env vars so retired settings in CI/deploy envs don't
+        # break startup.
         extra="ignore",
     )
 
