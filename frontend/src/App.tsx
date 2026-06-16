@@ -12,7 +12,7 @@ import { ContractDetailPage } from './pages/ContractDetailPage';
 import { PartiesPage } from './pages/PartiesPage';
 import { PartyDetailPage } from './pages/PartyDetailPage';
 import { Layout } from './components/Layout';
-import { RequireAuth, AuthCallback, AuthBridge } from './components/AuthGuards';
+import { RequireAuth, AuthCallback, AuthBridge, LoginRoute } from './components/AuthGuards';
 import './styles/App.css';
 
 // Create a query client for React Query
@@ -34,6 +34,7 @@ const App: React.FC = () => {
         <Routes>
           {/* Public routes */}
           <Route path="/" element={<HomePage />} />
+          <Route path="/login" element={<LoginRoute />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
           {/* Protected routes: require a WorkOS session */}
           <Route element={<RequireAuth />}>

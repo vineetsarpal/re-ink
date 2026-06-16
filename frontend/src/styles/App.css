@@ -2822,3 +2822,127 @@ tbody tr:last-child td {
   height: auto;
   flex: 1 1 auto;
 }
+
+/* Account panel: clickable sidebar avatar + modal hosting the WorkOS widget. */
+.sidebar-user--button {
+  width: 100%;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+.sidebar-user--button:hover {
+  background: var(--background);
+}
+
+.account-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: rgb(0 0 0 / 0.6);
+}
+
+/* Lift Radix Themes portals (widget dialogs/menus, z-index:auto) above the
+   account modal (z-index:1000) so they aren't hidden behind the backdrop. */
+.rt-BaseDialogOverlay {
+  z-index: 1100;
+}
+
+.rt-PopperContent {
+  z-index: 1101;
+}
+
+.account-modal__panel {
+  width: min(680px, 95vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 0.4);
+}
+
+.account-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+}
+
+.account-modal__title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.account-modal__close {
+  display: flex;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  padding: 0.25rem;
+  border-radius: 6px;
+}
+
+.account-modal__close:hover {
+  background: var(--background);
+}
+
+.account-modal__tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0 1.25rem;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+}
+
+.account-modal__tab {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 0.5rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.account-modal__tab:hover {
+  color: var(--text-primary);
+}
+
+.account-modal__tab.is-active {
+  color: var(--primary-color);
+  border-bottom-color: var(--primary-color);
+}
+
+.account-modal__body {
+  padding: 1.25rem;
+  overflow-y: auto;
+}
+
+.account-modal__status {
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 1.5rem 0;
+}
+
+.account-modal__status--error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}

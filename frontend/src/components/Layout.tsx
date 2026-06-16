@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@workos-inc/authkit-react';
 import { SecondarySidebarProvider } from '@/components/SecondarySidebar';
+import { AccountPanel } from '@/components/AccountPanel';
 import logoMark from '@/assets/logo.png';
 import logoWordmark from '@/assets/logo-wordmark.png';
 
@@ -41,6 +42,7 @@ export const Layout: React.FC = () => {
   const location = useLocation();
   const { user, signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(
     () => localStorage.getItem(NAV_COLLAPSED_KEY) === '1',
   );
@@ -150,9 +152,13 @@ export const Layout: React.FC = () => {
         <div className="sidebar-footer">
           {user && (
             <>
-              <div
-                className="sidebar-user"
+              <button
+                type="button"
+                className="sidebar-user sidebar-user--button"
                 title={user.email ?? undefined}
+                aria-label="Open account"
+                aria-haspopup="dialog"
+                onClick={() => setAccountOpen(true)}
               >
                 {user.profilePictureUrl ? (
                   <img
@@ -172,7 +178,7 @@ export const Layout: React.FC = () => {
                       : user.email}
                   </span>
                 )}
-              </div>
+              </button>
               <button
                 type="button"
                 className="nav-link sign-out-btn"
@@ -210,6 +216,8 @@ export const Layout: React.FC = () => {
           </SecondarySidebarProvider>
         </div>
       </main>
+
+      <AccountPanel open={accountOpen} onClose={() => setAccountOpen(false)} />
     </div>
   );
 };
