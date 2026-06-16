@@ -13,17 +13,49 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@workos-inc/authkit-react';
 import { registerAuth } from '@/services/api';
 
+const center = {
+  minHeight: '100vh',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  color: 'var(--text-secondary, #888)',
+} as const;
+
 const Loading: React.FC<{ label: string }> = ({ label }) => (
-  <div
-    style={{
-      minHeight: '100vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      color: 'var(--text-secondary, #888)',
-    }}
-  >
-    {label}
+  <div style={center}>{label}</div>
+);
+
+// Cross-redirect loop breaker. The per-mount ref resets on every reload, so a
+// failing sign-in (e.g. WorkOS rate-limit / bootstrap failure) would redirect
+// forever. We persist the attempt time in sessionStorage: if we return from a
+// sign-in still unauthenticated within the window, we stop and show an error
+// instead of redirecting again.
+const SIGNIN_ATTEMPT_KEY = 'reink:signin-attempt-at';
+const SIGNIN_LOOP_WINDOW_MS = 20_000;
+
+const recentSignInFailed = (): boolean => {
+  const at = Number(sessionStorage.getItem(SIGNIN_ATTEMPT_KEY) || 0);
+  return at > 0 && Date.now() - at < SIGNIN_LOOP_WINDOW_MS;
+};
+const markSignInAttempt = () =>
+  sessionStorage.setItem(SIGNIN_ATTEMPT_KEY, String(Date.now()));
+const clearSignInAttempt = () => sessionStorage.removeItem(SIGNIN_ATTEMPT_KEY);
+
+const AuthError: React.FC = () => (
+  <div style={center}>
+    <div style={{ textAlign: 'center', maxWidth: 420 }}>
+      <p>We couldn’t complete sign-in. This can happen briefly if the
+        authentication service is rate-limited — please wait a moment and retry.</p>
+      <button
+        className="btn btn-primary"
+        onClick={() => {
+          clearSignInAttempt();
+          window.location.assign('/login');
+        }}
+      >
+        Try again
+      </button>
+    </div>
   </div>
 );
 
@@ -32,18 +64,32 @@ export const RequireAuth: React.FC = () => {
   const { isLoading, user, signIn } = useAuth();
   const location = useLocation();
   const signInStartedRef = React.useRef(false);
+  const [looped, setLooped] = React.useState(false);
 
   useEffect(() => {
-    if (!isLoading && !user && !signInStartedRef.current) {
-      signInStartedRef.current = true;
-      void signIn({
-        state: {
-          returnTo: `${location.pathname}${location.search}${location.hash}`,
-        },
-      });
+    if (isLoading) return;
+    if (user) {
+      clearSignInAttempt(); // authenticated → reset the loop guard
+      return;
     }
+    if (signInStartedRef.current) return;
+    if (recentSignInFailed()) {
+      // Returned from a sign-in still unauthenticated → stop, don't re-redirect.
+      setLooped(true);
+      return;
+    }
+    signInStartedRef.current = true;
+    markSignInAttempt();
+    void signIn({
+      state: {
+        returnTo: `${location.pathname}${location.search}${location.hash}`,
+      },
+    });
   }, [isLoading, location.hash, location.pathname, location.search, user, signIn]);
 
+  if (looped) {
+    return <AuthError />;
+  }
   if (isLoading || !user) {
     return <Loading label="Loading…" />;
   }
@@ -55,23 +101,28 @@ export const LoginRoute: React.FC = () => {
   const { isLoading, user, signIn } = useAuth();
   const navigate = useNavigate();
   const signInStartedRef = React.useRef(false);
+  const [looped, setLooped] = React.useState(false);
 
   useEffect(() => {
-    if (isLoading) {
-      return;
-    }
-
+    if (isLoading) return;
     if (user) {
+      clearSignInAttempt();
       navigate('/dashboard', { replace: true });
       return;
     }
-
-    if (!signInStartedRef.current) {
-      signInStartedRef.current = true;
-      void signIn({ state: { returnTo: '/dashboard' } });
+    if (signInStartedRef.current) return;
+    if (recentSignInFailed()) {
+      setLooped(true);
+      return;
     }
+    signInStartedRef.current = true;
+    markSignInAttempt();
+    void signIn({ state: { returnTo: '/dashboard' } });
   }, [isLoading, user, navigate, signIn]);
 
+  if (looped) {
+    return <AuthError />;
+  }
   return <Loading label="Redirecting…" />;
 };
 
@@ -81,9 +132,11 @@ export const AuthCallback: React.FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!isLoading) {
-      navigate(user ? '/dashboard' : '/', { replace: true });
+    if (isLoading) return;
+    if (user) {
+      clearSignInAttempt(); // successful exchange → reset the loop guard
     }
+    navigate(user ? '/dashboard' : '/', { replace: true });
   }, [isLoading, user, navigate]);
 
   return <Loading label="Signing you in…" />;
