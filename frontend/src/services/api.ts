@@ -36,6 +36,9 @@ const api = axios.create({
 type TokenGetter = () => Promise<string | undefined>;
 let getAccessToken: TokenGetter | null = null;
 let onUnauthorized: (() => void) | null = null;
+// Re-auth at most once per page load: a burst of 401s must not trigger a
+// burst of signIn() calls, which would clobber the in-flight PKCE verifier.
+let reauthTriggered = false;
 
 export const registerAuth = (
   tokenGetter: TokenGetter,
@@ -58,9 +61,10 @@ api.interceptors.request.use(async (config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401 && onUnauthorized) {
-      // getAccessToken already auto-refreshes, so a 401 means the session is
-      // genuinely dead — re-authenticate rather than retry.
+    if (error.response?.status === 401 && onUnauthorized && !reauthTriggered) {
+      // One re-auth attempt per load. If the backend keeps rejecting a valid
+      // token (misconfig), surface the error instead of looping signIn().
+      reauthTriggered = true;
       onUnauthorized();
     }
     return Promise.reject(error);
