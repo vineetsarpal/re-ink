@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
+import { documentApi, type DocumentFileSource } from '@/services/api';
 // Vite resolves this to a bundled URL for the pdf.js web worker.
 import PdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
@@ -39,7 +40,7 @@ export interface GroundedBox {
 }
 
 interface DocumentPreviewProps {
-  documentUrl: string;
+  documentSource: DocumentFileSource;
   boxes: GroundedBox[];
   activeKey: string | null;
   /** Bump to re-jump to the active box's page (e.g. when its Source link is
@@ -53,7 +54,7 @@ interface DocumentPreviewProps {
 }
 
 export const DocumentPreview: React.FC<DocumentPreviewProps> = ({
-  documentUrl,
+  documentSource,
   boxes,
   activeKey,
   jumpSignal,
@@ -61,6 +62,9 @@ export const DocumentPreview: React.FC<DocumentPreviewProps> = ({
   fullscreen = false,
   onToggleFullscreen,
 }) => {
+  const protectedJobId =
+    documentSource.kind === 'protected' ? documentSource.jobId : null;
+  const publicUrl = documentSource.kind === 'public' ? documentSource.url : null;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pageWrapRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -75,37 +79,47 @@ export const DocumentPreview: React.FC<DocumentPreviewProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // --- Load the document once per URL --------------------------------------
+  // --- Load the document once per source -----------------------------------
   useEffect(() => {
     let cancelled = false;
+    let task: ReturnType<typeof pdfjsLib.getDocument> | null = null;
     setLoading(true);
     setError(null);
-    const task = pdfjsLib.getDocument(documentUrl);
-    task.promise.then(
-      (pdf) => {
+
+    const loadDocument = async () => {
+      try {
+        const source = protectedJobId
+          ? { data: await documentApi.getFileData(protectedJobId) }
+          : publicUrl;
+        if (cancelled) return;
+        if (!source) throw new Error('Document source is unavailable.');
+
+        task = pdfjsLib.getDocument(source);
+        const pdf = await task.promise;
         if (cancelled) {
-          pdf.destroy();
+          await pdf.destroy();
           return;
         }
         pdfRef.current = pdf;
         setNumPages(pdf.numPages);
         setLoading(false);
-      },
-      (err) => {
+      } catch (err: any) {
         if (cancelled) return;
         console.error('Failed to load document for preview:', err);
         const detail = err?.message ? ` (${err.name ?? 'Error'}: ${err.message})` : '';
         setError(`This document could not be rendered for preview.${detail}`);
         setLoading(false);
-      },
-    );
+      }
+    };
+
+    void loadDocument();
     return () => {
       cancelled = true;
-      task.destroy?.();
-      pdfRef.current?.destroy();
+      void task?.destroy();
+      void pdfRef.current?.destroy();
       pdfRef.current = null;
     };
-  }, [documentUrl]);
+  }, [protectedJobId, publicUrl]);
 
   // --- Track the available width so the page fits the column ---------------
   useEffect(() => {

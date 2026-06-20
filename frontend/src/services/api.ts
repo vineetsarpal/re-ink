@@ -47,13 +47,14 @@ export const registerAuth = (
   onUnauthorized = unauthorizedHandler;
 };
 
+/** Resolve a fresh Bearer header for the shared Axios client. */
+const getAuthorizationHeaders = async (): Promise<Record<string, string>> => {
+  const token = await getAccessToken?.();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 api.interceptors.request.use(async (config) => {
-  if (getAccessToken) {
-    const token = await getAccessToken();
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-  }
+  Object.assign(config.headers, await getAuthorizationHeaders());
   return config;
 });
 
@@ -116,11 +117,19 @@ export const documentApi = {
     await api.delete(`/documents/${jobId}`);
   },
 
-  /**
-   * Build the URL that streams the original uploaded document for a job.
-   * Used by the review preview panel. Returns a 404 for mock jobs (no file).
-   */
-  getFileUrl: (jobId: string): string => `${API_BASE_URL}/documents/file/${jobId}`,
+  /** Describe a protected document for the review preview. */
+  getFileSource: (jobId: string): DocumentFileSource => ({
+    kind: 'protected',
+    jobId,
+  }),
+
+  /** Fetch protected PDF bytes through Axios so auth and 401 handling apply. */
+  getFileData: async (jobId: string): Promise<Uint8Array> => {
+    const response = await api.get<ArrayBuffer>(`/documents/file/${jobId}`, {
+      responseType: 'arraybuffer',
+    });
+    return new Uint8Array(response.data);
+  },
 
   /**
    * Seed a mock extraction job for local testing (skips LandingAI).
@@ -131,6 +140,10 @@ export const documentApi = {
     return response.data;
   },
 };
+
+export type DocumentFileSource =
+  | { kind: 'protected'; jobId: string }
+  | { kind: 'public'; url: string };
 
 // Widget APIs
 export const widgetApi = {

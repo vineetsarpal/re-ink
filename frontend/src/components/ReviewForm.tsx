@@ -16,7 +16,7 @@ import type {
   PartyMatchResult,
   GuidedIntakeResponse,
 } from '@/types';
-import { reviewApi, partyApi } from '@/services/api';
+import { reviewApi, partyApi, type DocumentFileSource } from '@/services/api';
 import { DocumentPreview, type GroundedBox } from '@/components/DocumentPreview';
 import { SecondarySidebar } from '@/components/SecondarySidebar';
 
@@ -66,8 +66,8 @@ const CONTRACT_LABELS: Record<string, string> = Object.fromEntries(
 
 interface ReviewFormProps {
   extractionResult: ExtractionResult;
-  /** URL streaming the original document for preview. Null for mock jobs. */
-  documentUrl?: string | null;
+  /** Original document source; protected backend files require a Bearer token. */
+  documentSource?: DocumentFileSource | null;
   agentAnalysis?: GuidedIntakeResponse | null;
   agentLoading?: boolean;
   agentError?: string | null;
@@ -79,7 +79,7 @@ interface ReviewFormProps {
 
 export const ReviewForm: React.FC<ReviewFormProps> = ({
   extractionResult,
-  documentUrl = null,
+  documentSource = null,
   agentAnalysis,
   agentLoading = false,
   agentError = null,
@@ -916,7 +916,7 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
           </div>
         )}
 
-        {documentUrl && (
+        {documentSource && (
           <div className="source-panel__preview">
             <div className="source-panel__preview-head">
               <span className="source-panel__preview-title">
@@ -936,7 +936,7 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
                 : 'Focus a field with a Source link to locate it in the document.'}
             </p>
             <DocumentPreview
-              documentUrl={documentUrl}
+              documentSource={documentSource}
               boxes={groundedBoxes}
               activeKey={activeKey}
               jumpSignal={jumpSignal}
@@ -949,7 +949,7 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
       </div>
 
       {/* Enlarged document-with-boxes view. */}
-      {documentUrl && isPreviewExpanded && (
+      {documentSource && isPreviewExpanded && (
         <div
           className="doc-modal"
           role="dialog"
@@ -959,7 +959,7 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
         >
           <div className="doc-modal__panel" onClick={(e) => e.stopPropagation()}>
             <DocumentPreview
-              documentUrl={documentUrl}
+              documentSource={documentSource}
               boxes={groundedBoxes}
               activeKey={activeKey}
               jumpSignal={jumpSignal}

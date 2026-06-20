@@ -6,7 +6,12 @@ import { useNavigate } from 'react-router-dom';
 import { FileUpload } from '@/components/FileUpload';
 import { ExtractionStatus } from '@/components/ExtractionStatus';
 import { ReviewForm } from '@/components/ReviewForm';
-import { agentApi, documentApi, systemApi } from '@/services/api';
+import {
+  agentApi,
+  documentApi,
+  systemApi,
+  type DocumentFileSource,
+} from '@/services/api';
 import type {
   DocumentUploadResponse,
   DocumentExtractionStatus,
@@ -23,16 +28,18 @@ const BUNDLED_SAMPLES = new Set([
   'quota-share-reinsurance-contract.pdf',
 ]);
 
-/** Resolve the document URL for the review preview, real jobs and mock alike. */
-const resolveDocumentUrl = (
+/** Resolve the document source for the review preview, real jobs and mocks. */
+const resolveDocumentSource = (
   uploadResponse: DocumentUploadResponse | null,
   isMockJob: boolean,
   status: DocumentExtractionStatus | null,
-): string | null => {
+): DocumentFileSource | null => {
   if (!uploadResponse) return null;
-  if (!isMockJob) return documentApi.getFileUrl(uploadResponse.job_id);
+  if (!isMockJob) return documentApi.getFileSource(uploadResponse.job_id);
   const filename = status?.result?.extraction_metadata?.filename;
-  return filename && BUNDLED_SAMPLES.has(filename) ? `/samples/${filename}` : null;
+  return filename && BUNDLED_SAMPLES.has(filename)
+    ? { kind: 'public', url: `/samples/${filename}` }
+    : null;
 };
 
 export const UploadPage: React.FC = () => {
@@ -250,7 +257,7 @@ export const UploadPage: React.FC = () => {
         {currentStep === 'review' && extractionStatus?.result && (
           <ReviewForm
             extractionResult={extractionStatus.result}
-            documentUrl={resolveDocumentUrl(uploadResponse, isMockJob, extractionStatus)}
+            documentSource={resolveDocumentSource(uploadResponse, isMockJob, extractionStatus)}
             onApprove={handleApprove}
             onReject={handleReject}
             onCancel={handleCancel}
