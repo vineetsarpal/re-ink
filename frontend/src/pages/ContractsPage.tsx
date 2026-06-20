@@ -1,7 +1,7 @@
 /**
  * ContractsPage - List and manage all contracts.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, Filter, Plus } from 'lucide-react';
 import { contractApi } from '@/services/api';
@@ -14,11 +14,7 @@ export const ContractsPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
 
-  useEffect(() => {
-    loadContracts();
-  }, [statusFilter]);
-
-  const loadContracts = async () => {
+  const loadContracts = useCallback(async () => {
     setIsLoading(true);
     try {
       const data = await contractApi.getAll({
@@ -30,7 +26,11 @@ export const ContractsPage: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [statusFilter]);
+
+  useEffect(() => {
+    void loadContracts();
+  }, [loadContracts]);
 
   const filteredContracts = contracts.filter((contract) => {
     const matchesSearch =
