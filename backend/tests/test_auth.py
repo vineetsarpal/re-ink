@@ -50,12 +50,13 @@ def rsa_keys():
 
 @pytest.fixture(autouse=True)
 def _wire_auth(monkeypatch, rsa_keys):
-    """Point the WorkOS client id at our test issuer and resolve the test key."""
+    """Point auth at the test issuer and a deterministic in-memory JWKS."""
     from app.core import auth
 
     monkeypatch.setattr(auth.settings, "WORKOS_CLIENT_ID", CLIENT_ID, raising=False)
     _, public_pem = rsa_keys
-    monkeypatch.setattr(auth, "_signing_key_for", lambda kid: public_pem)
+    monkeypatch.setattr(auth, "_jwks_cache", {})
+    monkeypatch.setattr(auth, "_fetch_jwks", lambda: {KID: public_pem})
 
 
 def _mint(private_pem, **overrides):
@@ -98,6 +99,28 @@ def test_expired_token_is_rejected(rsa_keys):
 
     with pytest.raises(AuthError):
         decode_and_validate(token)
+
+
+def test_small_expiry_clock_skew_is_allowed(rsa_keys):
+    """A token just beyond exp remains valid within the configured leeway."""
+    from app.core.auth import decode_and_validate
+
+    private_pem, _ = rsa_keys
+    now = int(time.time())
+    token = _mint(private_pem, iat=now - 3600, nbf=now - 3600, exp=now - 15)
+
+    assert decode_and_validate(token).user_id == "user_01H"
+
+
+def test_small_not_before_clock_skew_is_allowed(rsa_keys):
+    """A token just before nbf remains valid within the configured leeway."""
+    from app.core.auth import decode_and_validate
+
+    private_pem, _ = rsa_keys
+    now = int(time.time())
+    token = _mint(private_pem, nbf=now + 15, exp=now + 3600)
+
+    assert decode_and_validate(token).user_id == "user_01H"
 
 
 def test_wrong_issuer_is_rejected(rsa_keys):
@@ -181,6 +204,50 @@ def test_token_without_org_yields_none_org(rsa_keys):
     assert user.permissions == []
 
 
+def test_jwks_cache_avoids_repeated_fetches(monkeypatch):
+    from app.core import auth
+
+    calls = 0
+
+    def fetch():
+        nonlocal calls
+        calls += 1
+        return {"kid-1": {"kid": "kid-1"}}
+
+    monkeypatch.setattr(auth, "_fetch_jwks", fetch)
+
+    assert auth._signing_key_for("kid-1") == {"kid": "kid-1"}
+    assert auth._signing_key_for("kid-1") == {"kid": "kid-1"}
+    assert calls == 1
+
+
+def test_jwks_cache_refreshes_when_kid_rotates(monkeypatch):
+    from app.core import auth
+
+    responses = iter(
+        [
+            {"kid-old": {"kid": "kid-old"}},
+            {
+                "kid-old": {"kid": "kid-old"},
+                "kid-new": {"kid": "kid-new"},
+            },
+        ]
+    )
+    monkeypatch.setattr(auth, "_fetch_jwks", lambda: next(responses))
+
+    assert auth._signing_key_for("kid-old") == {"kid": "kid-old"}
+    assert auth._signing_key_for("kid-new") == {"kid": "kid-new"}
+
+
+def test_unknown_kid_is_rejected_after_refresh(monkeypatch):
+    from app.core import auth
+
+    monkeypatch.setattr(auth, "_fetch_jwks", lambda: {})
+
+    with pytest.raises(auth.AuthError, match="unknown signing key"):
+        auth._signing_key_for("missing")
+
+
 def test_protected_endpoint_requires_token():
     """A resource endpoint returns 401 when no Bearer token is supplied."""
     from fastapi.testclient import TestClient
@@ -190,6 +257,11 @@ def test_protected_endpoint_requires_token():
     client = TestClient(app)
     resp = client.get("/api/contracts/")
     assert resp.status_code == 401
+
+    # The PDF preview uses this file endpoint directly; it is protected by the
+    # same router dependency and therefore must receive the SPA Bearer token.
+    file_resp = client.get("/api/documents/file/missing-job")
+    assert file_resp.status_code == 401
 
 
 def test_public_endpoints_need_no_token():

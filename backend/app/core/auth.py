@@ -23,6 +23,7 @@ from jose.exceptions import JWTError
 from app.core.config import settings
 
 _ALGORITHMS = ["RS256"]
+_CLOCK_SKEW_LEEWAY_SECONDS = 30
 
 
 @dataclass
@@ -85,6 +86,7 @@ def decode_and_validate(token: str) -> CurrentUser:
             key,
             algorithms=_ALGORITHMS,
             issuer=_issuer(),
+            options={"leeway": _CLOCK_SKEW_LEEWAY_SECONDS},
         )
     except (JWTError, AuthError, KeyError) as exc:
         raise AuthError(str(exc)) from exc

@@ -68,7 +68,9 @@ export const Layout: React.FC = () => {
 
   const confirmSignOut = () => {
     setSignOutConfirmOpen(false);
-    signOut({ returnTo: window.location.origin });
+    // WorkOS redirects to the configured App homepage. Avoid a custom
+    // `returnTo`, which would require a separate Sign-out redirect allowlist.
+    signOut();
   };
 
   // Close the drawer whenever the route changes.
