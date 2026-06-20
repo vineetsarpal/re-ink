@@ -94,8 +94,14 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
   // Source grounding: which field's evidence is shown in the side panel, and
   // whether the document preview is expanded. `activeKey` is "contract:<name>"
   // or "party:<index>".
-  const contractSources = extractionResult.field_sources?.contract ?? {};
-  const partySources = extractionResult.field_sources?.parties ?? [];
+  const contractSources = useMemo(
+    () => extractionResult.field_sources?.contract ?? {},
+    [extractionResult.field_sources?.contract],
+  );
+  const partySources = useMemo(
+    () => extractionResult.field_sources?.parties ?? [],
+    [extractionResult.field_sources?.parties],
+  );
   const [activeKey, setActiveKey] = useState<string | null>(null);
   // Whether the document-with-boxes preview is opened in the enlarge modal.
   const [isPreviewExpanded, setIsPreviewExpanded] = useState(false);

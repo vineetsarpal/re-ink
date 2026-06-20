@@ -26,6 +26,11 @@ const SAMPLE_DOCUMENTS = [
   },
 ];
 
+const ALLOWED_TYPES = [
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+];
+
 interface FileUploadProps {
   onUploadSuccess?: (response: DocumentUploadResponse) => void;
   onUploadError?: (error: string) => void;
@@ -42,13 +47,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
 
-  const allowedTypes = [
-    'application/pdf',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  ];
-
-  const validateFile = (file: File): boolean => {
-    if (!allowedTypes.includes(file.type)) {
+  const validateFile = useCallback((file: File): boolean => {
+    if (!ALLOWED_TYPES.includes(file.type)) {
       setError('Only PDF and DOCX files are supported');
       return false;
     }
@@ -60,14 +60,14 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     }
 
     return true;
-  };
+  }, []);
 
   const handleFileSelect = useCallback((file: File) => {
     setError(null);
     if (validateFile(file)) {
       setSelectedFile(file);
     }
-  }, []);
+  }, [validateFile]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();

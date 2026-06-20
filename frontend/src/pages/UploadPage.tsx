@@ -1,7 +1,7 @@
 /**
  * UploadPage - Full workflow for uploading and processing documents.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FileUpload } from '@/components/FileUpload';
 import { ExtractionStatus } from '@/components/ExtractionStatus';
@@ -124,7 +124,7 @@ export const UploadPage: React.FC = () => {
     }
   };
 
-  const fetchIntakeAgent = async () => {
+  const fetchIntakeAgent = useCallback(async () => {
     const jobId = uploadResponse?.job_id;
     if (!jobId) return;
     setIsIntakeLoading(true);
@@ -143,7 +143,7 @@ export const UploadPage: React.FC = () => {
     } finally {
       setIsIntakeLoading(false);
     }
-  };
+  }, [uploadResponse?.job_id]);
 
   useEffect(() => {
     systemApi
@@ -161,9 +161,9 @@ export const UploadPage: React.FC = () => {
       extractionStatus?.result &&
       lastAgentJobId.current !== uploadResponse.job_id
     ) {
-      fetchIntakeAgent();
+      void fetchIntakeAgent();
     }
-  }, [currentStep, uploadResponse?.job_id, extractionStatus?.result]);
+  }, [currentStep, uploadResponse?.job_id, extractionStatus?.result, fetchIntakeAgent]);
 
   const handleApprove = (
     contractId: number,
