@@ -71,6 +71,10 @@ export const DocumentPreview: React.FC<DocumentPreviewProps> = ({
   const activeBoxRef = useRef<HTMLButtonElement>(null);
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
   const renderTaskRef = useRef<RenderTask | null>(null);
+  // Bumped per renderPage call so a superseded invocation can bail before it
+  // touches the shared canvas (concurrent render() on one canvas throws in
+  // pdf.js and leaves the page blank).
+  const renderGenRef = useRef(0);
 
   const [numPages, setNumPages] = useState(0);
   const [page, setPage] = useState(1);
@@ -151,31 +155,41 @@ export const DocumentPreview: React.FC<DocumentPreviewProps> = ({
     const canvas = canvasRef.current;
     if (!pdf || !canvas || containerWidth === 0) return;
 
+    // Claim this generation up front (synchronously) and cancel any in-flight
+    // render. After the first await, an older invocation will see its gen is
+    // stale and bail before clearing/drawing — so only the latest call ever
+    // touches the canvas. Without this, two calls firing close together (on
+    // load containerWidth, loading and page all settle at once) both run
+    // canvas.width = … (which clears the canvas) and render() on the same
+    // canvas, which pdf.js rejects — leaving the page blank intermittently.
+    const gen = ++renderGenRef.current;
     renderTaskRef.current?.cancel();
 
-    const pdfPage = await pdf.getPage(page);
-    const base = pdfPage.getViewport({ scale: 1 });
-    // Fit page width to the column, then apply the user's zoom.
-    const fitScale = (containerWidth / base.width) * zoom;
-    const viewport = pdfPage.getViewport({ scale: fitScale });
-    const dpr = window.devicePixelRatio || 1;
-
-    canvas.width = Math.floor(viewport.width * dpr);
-    canvas.height = Math.floor(viewport.height * dpr);
-    canvas.style.width = `${Math.floor(viewport.width)}px`;
-    canvas.style.height = `${Math.floor(viewport.height)}px`;
-    if (pageWrapRef.current) {
-      pageWrapRef.current.style.width = `${Math.floor(viewport.width)}px`;
-      pageWrapRef.current.style.height = `${Math.floor(viewport.height)}px`;
-    }
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    const task = pdfPage.render({ canvasContext: ctx, viewport });
-    renderTaskRef.current = task;
     try {
+      const pdfPage = await pdf.getPage(page);
+      if (gen !== renderGenRef.current) return;
+
+      const base = pdfPage.getViewport({ scale: 1 });
+      // Fit page width to the column, then apply the user's zoom.
+      const fitScale = (containerWidth / base.width) * zoom;
+      const viewport = pdfPage.getViewport({ scale: fitScale });
+      const dpr = window.devicePixelRatio || 1;
+
+      canvas.width = Math.floor(viewport.width * dpr);
+      canvas.height = Math.floor(viewport.height * dpr);
+      canvas.style.width = `${Math.floor(viewport.width)}px`;
+      canvas.style.height = `${Math.floor(viewport.height)}px`;
+      if (pageWrapRef.current) {
+        pageWrapRef.current.style.width = `${Math.floor(viewport.width)}px`;
+        pageWrapRef.current.style.height = `${Math.floor(viewport.height)}px`;
+      }
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      const task = pdfPage.render({ canvasContext: ctx, viewport });
+      renderTaskRef.current = task;
       await task.promise;
     } catch (err: any) {
       if (err?.name !== 'RenderingCancelledException') {
