@@ -4,7 +4,6 @@ Endpoints exposing LangChain/LangGraph powered agents.
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.db.database import get_db
 from app.core.tenancy import get_tenant_db
 from app.schemas.agent import (
     AutomatedReviewRequest,
@@ -20,7 +19,7 @@ router = APIRouter()
 @router.post("/intake", response_model=GuidedIntakeResponse, tags=["agents"])
 async def run_guided_intake_agent(
     request: GuidedIntakeRequest,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_tenant_db),
 ) -> GuidedIntakeResponse:
     """Run the guided contract intake agent against a completed extraction job."""
     try:

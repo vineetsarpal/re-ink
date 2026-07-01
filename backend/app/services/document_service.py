@@ -30,6 +30,7 @@ class DocumentService:
     async def save_uploaded_file(
         self,
         file: UploadFile,
+        org_id: str,
         job_id: Optional[str] = None
     ) -> Dict[str, str]:
         """
@@ -58,9 +59,12 @@ class DocumentService:
             if not job_id:
                 job_id = str(uuid.uuid4())
 
-            # Create safe filename
+            # Create safe filename, partitioned by org so tenant files are
+            # separated at rest (and deletable per tenant on offboarding).
             safe_filename = f"{job_id}_{self._sanitize_filename(file.filename)}"
-            file_path = self.upload_dir / safe_filename
+            org_dir = self.upload_dir / org_id
+            org_dir.mkdir(parents=True, exist_ok=True)
+            file_path = org_dir / safe_filename
 
             # Check file size by reading in chunks
             total_size = 0

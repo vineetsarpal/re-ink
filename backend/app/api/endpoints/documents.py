@@ -8,7 +8,9 @@ from datetime import datetime, timezone
 import logging
 
 from app.core.config import settings
-from app.db.database import get_db, SessionLocal
+from app.db.database import SessionLocal
+from app.core.auth import CurrentUser, get_current_user
+from app.core.tenancy import bind_session_to_org, get_tenant_db
 from app.schemas.document import (
     DocumentUploadResponse,
     DocumentExtractionStatus,
@@ -29,7 +31,8 @@ async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     api_key: Optional[str] = Form(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_tenant_db),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """
     Upload a reinsurance contract document for processing.
@@ -48,7 +51,7 @@ async def upload_document(
         )
 
     try:
-        file_info = await document_service.save_uploaded_file(file)
+        file_info = await document_service.save_uploaded_file(file, org_id=user.org_id)
 
         job = ExtractionJob(
             job_id=file_info["job_id"],
@@ -65,6 +68,7 @@ async def upload_document(
             file_info["file_path"],
             file_info["job_id"],
             resolved_key,
+            user.org_id,
         )
 
         return DocumentUploadResponse(
@@ -82,12 +86,17 @@ async def upload_document(
         raise HTTPException(status_code=500, detail="Error uploading document")
 
 
-async def process_document_extraction(file_path: str, job_id: str, api_key: str):
+async def process_document_extraction(
+    file_path: str, job_id: str, api_key: str, org_id: str
+):
     """
     Background task to process document extraction via LandingAI ADE Parse API.
-    Uses a fresh DB session since background tasks run outside the request lifecycle.
+    Uses a fresh DB session since background tasks run outside the request
+    lifecycle; it must be bound to the job's org so RLS lets it read and update
+    the job it owns.
     """
     db = SessionLocal()
+    bind_session_to_org(db, org_id)
     try:
         raw_results = await landingai_service.submit_document_for_extraction(
             file_path, api_key=api_key
@@ -121,7 +130,7 @@ async def process_document_extraction(file_path: str, job_id: str, api_key: str)
 
 
 @router.get("/status/{job_id}", response_model=DocumentExtractionStatus)
-async def get_extraction_status(job_id: str, db: Session = Depends(get_db)):
+async def get_extraction_status(job_id: str, db: Session = Depends(get_tenant_db)):
     """
     Get the status of a document extraction job.
 
@@ -156,7 +165,7 @@ async def get_extraction_status(job_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/results/{job_id}", response_model=ExtractionResult)
-async def get_extraction_results(job_id: str, db: Session = Depends(get_db)):
+async def get_extraction_results(job_id: str, db: Session = Depends(get_tenant_db)):
     """
     Get the extracted data for a completed job.
     """
@@ -186,7 +195,7 @@ async def get_extraction_results(job_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/file/{job_id}")
-async def get_source_document(job_id: str, db: Session = Depends(get_db)):
+async def get_source_document(job_id: str, db: Session = Depends(get_tenant_db)):
     """
     Stream the original uploaded document for a job, for the review preview
     panel. Returns 404 when the file is unavailable (e.g. mock jobs, which
@@ -218,7 +227,7 @@ async def get_source_document(job_id: str, db: Session = Depends(get_db)):
 
 
 @router.delete("/{job_id}")
-async def delete_document(job_id: str, db: Session = Depends(get_db)):
+async def delete_document(job_id: str, db: Session = Depends(get_tenant_db)):
     """
     Delete a document and its associated extraction data.
     """
@@ -236,7 +245,7 @@ async def delete_document(job_id: str, db: Session = Depends(get_db)):
 @router.post("/mock-job", response_model=DocumentExtractionStatus)
 async def seed_mock_job(
     payload: Optional[dict] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_tenant_db)
 ):
     """
     Seed a mock extraction job for testing (skips LandingAI).
