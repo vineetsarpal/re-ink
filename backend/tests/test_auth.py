@@ -203,6 +203,31 @@ def test_token_without_org_yields_none_org(rsa_keys):
     assert user.permissions == []
 
 
+def test_get_current_user_rejects_orgless_token(rsa_keys):
+    """Every authenticated request must resolve to an org; an orgless token is 401."""
+    from fastapi import HTTPException
+    from fastapi.security import HTTPAuthorizationCredentials
+
+    from app.core.auth import get_current_user
+
+    private_pem, _ = rsa_keys
+    now = int(time.time())
+    claims = {
+        "sub": "user_01H",
+        "sid": "session_01H",
+        "iss": ISSUER,
+        "iat": now,
+        "nbf": now - 5,
+        "exp": now + 3600,
+    }
+    token = jwt.encode(claims, private_pem, algorithm="RS256", headers={"kid": KID})
+    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+    with pytest.raises(HTTPException) as exc:
+        get_current_user(creds)
+    assert exc.value.status_code == 401
+
+
 def test_jwks_cache_avoids_repeated_fetches(monkeypatch):
     from app.core import auth
 

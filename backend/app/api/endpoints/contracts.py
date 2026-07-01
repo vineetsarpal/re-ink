@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
 
-from app.db.database import get_db
+from app.core.tenancy import get_tenant_db
 from app.models.contract import Contract, contract_parties
 from app.models.party import Party
 from app.schemas.contract import (
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 @router.post("/", response_model=ContractResponse, status_code=201)
 def create_contract(
     contract_data: ContractCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_tenant_db)
 ):
     """
     Create a new contract.
@@ -86,7 +86,7 @@ def list_contracts(
     limit: int = Query(100, ge=1, le=1000),
     status: Optional[str] = None,
     contract_type: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_tenant_db)
 ):
     """
     List all contracts with optional filtering and pagination.
@@ -111,7 +111,7 @@ def list_contracts(
 
 
 @router.get("/{contract_id}", response_model=ContractWithParties)
-def get_contract(contract_id: int, db: Session = Depends(get_db)):
+def get_contract(contract_id: int, db: Session = Depends(get_tenant_db)):
     """
     Get a specific contract by ID, including associated parties.
 
@@ -153,7 +153,7 @@ def get_contract(contract_id: int, db: Session = Depends(get_db)):
 def update_contract(
     contract_id: int,
     contract_update: ContractUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_tenant_db)
 ):
     """
     Update an existing contract.
@@ -184,7 +184,7 @@ def update_contract(
 
 
 @router.delete("/{contract_id}")
-def delete_contract(contract_id: int, db: Session = Depends(get_db)):
+def delete_contract(contract_id: int, db: Session = Depends(get_tenant_db)):
     """
     Delete a contract (soft delete by setting is_active=False).
     """
@@ -214,7 +214,7 @@ def add_party_to_contract(
     contract_id: int,
     party_id: int,
     role: str = Query(..., description="Role of party in this contract"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_tenant_db)
 ):
     """
     Associate a party with a contract.
@@ -259,7 +259,7 @@ def update_party_role(
     contract_id: int,
     party_id: int,
     role: str = Query(..., description="New role for the party on this contract"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_tenant_db)
 ):
     """
     Update the role of a party on a specific contract.
@@ -287,7 +287,7 @@ def update_party_role(
 def remove_party_from_contract(
     contract_id: int,
     party_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_tenant_db)
 ):
     """
     Remove a party association from a contract.

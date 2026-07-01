@@ -115,10 +115,19 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     try:
-        return decode_and_validate(credentials.credentials)
+        user = decode_and_validate(credentials.credentials)
     except AuthError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    # Every authenticated request must act within an organization (tenant); a
+    # token carrying no org has no tenant to scope to, so it is rejected.
+    if not user.org_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No organization in token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user

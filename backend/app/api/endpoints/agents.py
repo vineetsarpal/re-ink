@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
+from app.core.tenancy import get_tenant_db
 from app.schemas.agent import (
     AutomatedReviewRequest,
     AutomatedReviewResponse,
@@ -31,7 +32,7 @@ async def run_guided_intake_agent(
 @router.post("/review", response_model=AutomatedReviewResponse, tags=["agents"])
 def run_automated_review_agent(
     request: AutomatedReviewRequest,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_tenant_db),
 ) -> AutomatedReviewResponse:
     """Generate an automated review for an existing contract."""
     try:

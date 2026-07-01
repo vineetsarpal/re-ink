@@ -129,23 +129,75 @@ def db_session(restricted_engine):
         yield session
     finally:
         session.close()
-        transaction.rollback()
+        # A failed statement (e.g. a constraint violation) may already have
+        # unwound the transaction; only roll back if it is still active.
+        if transaction.is_active:
+            transaction.rollback()
         connection.close()
+
+
+DEFAULT_TEST_ORG = "org_test_default"
 
 
 @pytest.fixture()
 def client(db_session):
-    """A TestClient whose ``get_db`` dependency yields the per-test ``db_session``."""
+    """A TestClient authenticated as a default org.
+
+    Binds the per-test ``db_session`` to a default org and routes both ``get_db``
+    and ``get_tenant_db`` at it, so the whole app runs org-scoped under real RLS.
+    Use ``as_org`` instead when a test needs to exercise cross-org isolation.
+    """
     from fastapi.testclient import TestClient
 
+    from app.core.auth import CurrentUser, get_current_user
+    from app.core.tenancy import bind_session_to_org, get_tenant_db
     from app.db.database import get_db
     from app.main import app
+
+    bind_session_to_org(db_session, DEFAULT_TEST_ORG)
 
     def _get_test_db():
         yield db_session
 
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        user_id="test-user", org_id=DEFAULT_TEST_ORG
+    )
     app.dependency_overrides[get_db] = _get_test_db
+    app.dependency_overrides[get_tenant_db] = _get_test_db
     try:
         yield TestClient(app)
     finally:
-        app.dependency_overrides.pop(get_db, None)
+        for dep in (get_current_user, get_db, get_tenant_db):
+            app.dependency_overrides.pop(dep, None)
+
+
+@pytest.fixture()
+def as_org(db_session):
+    """Factory: return a TestClient acting as ``org_id``.
+
+    Both auth and the tenant DB dependency are overridden onto the shared,
+    restricted ``db_session`` bound to the requested org, so endpoint tests run
+    under real RLS. Calling the factory again re-binds to a different org within
+    the same test transaction, which is how cross-org isolation is exercised.
+    """
+    from fastapi.testclient import TestClient
+
+    from app.core.auth import CurrentUser, get_current_user
+    from app.core.tenancy import bind_session_to_org, get_tenant_db
+    from app.main import app
+
+    def _act_as(org_id: str) -> TestClient:
+        app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+            user_id="test-user", org_id=org_id
+        )
+
+        def _tenant_db():
+            bind_session_to_org(db_session, org_id)
+            yield db_session
+
+        app.dependency_overrides[get_tenant_db] = _tenant_db
+        return TestClient(app)
+
+    yield _act_as
+    app.dependency_overrides.pop(get_current_user, None)
+    app.dependency_overrides.pop(get_tenant_db, None)
