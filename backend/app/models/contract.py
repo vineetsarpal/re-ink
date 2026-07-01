@@ -3,7 +3,7 @@ Contract model representing reinsurance contracts with associated parties and do
 """
 from sqlalchemy import (
     Column, Integer, String, DateTime, Text, Numeric,
-    Date, Boolean, ForeignKey, Table
+    Date, Boolean, ForeignKey, Table, UniqueConstraint, text
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -26,11 +26,21 @@ class Contract(Base):
     Contract entity representing a reinsurance contract with all relevant details.
     """
     __tablename__ = "contracts"
+    __table_args__ = (
+        UniqueConstraint(
+            "org_id", "contract_number", name="uq_contracts_org_contract_number"
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
+    org_id = Column(
+        String(255),
+        nullable=False,
+        server_default=text("current_setting('app.current_org', true)"),
+    )
 
     # Contract Identification
-    contract_number = Column(String(100), unique=True, nullable=False, index=True)
+    contract_number = Column(String(100), nullable=False, index=True)
     contract_name = Column(String(255), nullable=False)
     contract_type = Column(String(50))  # treaty, facultative
     contract_sub_type = Column(String(100))  # quota_share, surplus, xol, facultative_obligatory, facultative_optional

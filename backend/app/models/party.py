@@ -1,7 +1,16 @@
 """
 Party model representing a party (individual or organization) in reinsurance contracts.
 """
-from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.database import Base
@@ -15,8 +24,18 @@ class Party(Base):
     a cedant on one contract and a reinsurer on another.
     """
     __tablename__ = "parties"
+    __table_args__ = (
+        UniqueConstraint(
+            "org_id", "registration_number", name="uq_parties_org_registration_number"
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
+    org_id = Column(
+        String(255),
+        nullable=False,
+        server_default=text("current_setting('app.current_org', true)"),
+    )
 
     # Basic Information
     name = Column(String(255), nullable=False, index=True)
@@ -32,7 +51,7 @@ class Party(Base):
     country = Column(String(100))
 
     # Business Details
-    registration_number = Column(String(100), unique=True)  # Company registration or tax ID
+    registration_number = Column(String(100))  # Company registration or tax ID
     license_number = Column(String(100))  # Insurance license number
 
     # Additional Information

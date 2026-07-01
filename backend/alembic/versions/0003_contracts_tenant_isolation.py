@@ -19,6 +19,28 @@ depends_on: Union[str, Sequence[str], None] = None
 LEGACY_ORG_ID = "org_01KV720766F2G63DEE1XR5FKJ0"
 
 
+def _drop_single_column_unique(table_name: str, column_name: str) -> None:
+    """Drop legacy single-column uniqueness from either Alembic or create_all."""
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+
+    for constraint in inspector.get_unique_constraints(table_name):
+        if constraint.get("column_names") == [column_name] and constraint.get("name"):
+            op.drop_constraint(constraint["name"], table_name, type_="unique")
+
+    # Databases originally created from SQLAlchemy models may have a unique
+    # index instead of a named unique constraint when unique=True and index=True
+    # were both set on the column.
+    inspector = sa.inspect(bind)
+    for index in inspector.get_indexes(table_name):
+        if (
+            index.get("unique")
+            and index.get("column_names") == [column_name]
+            and index.get("name")
+        ):
+            op.drop_index(index["name"], table_name=table_name)
+
+
 def upgrade() -> None:
     op.add_column("contracts", sa.Column("org_id", sa.String(length=255), nullable=True))
     op.execute(
@@ -32,7 +54,7 @@ def upgrade() -> None:
     )
 
     # Contract numbers are unique per organization, not platform-wide.
-    op.drop_constraint("contracts_contract_number_key", "contracts", type_="unique")
+    _drop_single_column_unique("contracts", "contract_number")
     op.create_unique_constraint(
         "uq_contracts_org_contract_number", "contracts", ["org_id", "contract_number"]
     )
