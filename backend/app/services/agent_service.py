@@ -26,7 +26,6 @@ from app.schemas.contract import ContractCreate, ContractWithParties
 from app.schemas.document import ReviewData
 from app.schemas.party import PartyAction
 from app.schemas.party import PartyCreate
-from app.db.database import SessionLocal
 from app.models.extraction_job import ExtractionJob
 
 
@@ -115,17 +114,13 @@ class AgentService:
     # Guided contract intake
     # ------------------------------------------------------------------ #
 
-    def run_guided_intake(self, request: GuidedIntakeRequest) -> GuidedIntakeResponse:
-        db = SessionLocal()
-        try:
-            job = db.query(ExtractionJob).filter(ExtractionJob.job_id == request.job_id).first()
-            job_payload = {
-                "status": job.status,
-                "parsed_results": job.parsed_results,
-                "raw_results": job.raw_results,
-            } if job else None
-        finally:
-            db.close()
+    def run_guided_intake(self, db: Session, request: GuidedIntakeRequest) -> GuidedIntakeResponse:
+        job = db.query(ExtractionJob).filter(ExtractionJob.job_id == request.job_id).first()
+        job_payload = {
+            "status": job.status,
+            "parsed_results": job.parsed_results,
+            "raw_results": job.raw_results,
+        } if job else None
         if self._offline_mode:
             return self._run_guided_intake_offline(request, job_payload)
 

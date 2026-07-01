@@ -2,7 +2,7 @@
 ExtractionJob model for persisting document extraction job state.
 Replaces the in-memory dict so jobs survive across workers and restarts.
 """
-from sqlalchemy import Column, String, DateTime, Text, JSON
+from sqlalchemy import Column, String, DateTime, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from app.db.database import Base
@@ -17,8 +17,8 @@ class ExtractionJob(Base):
     file_path = Column(String(500))
     message = Column(Text)
     landingai_job_id = Column(String(100))
-    raw_results = Column(JSONB().with_variant(JSON(), "sqlite"))
-    parsed_results = Column(JSONB().with_variant(JSON(), "sqlite"))
+    raw_results = Column(JSONB())
+    parsed_results = Column(JSONB())
     error = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True))

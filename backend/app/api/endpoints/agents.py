@@ -19,10 +19,11 @@ router = APIRouter()
 @router.post("/intake", response_model=GuidedIntakeResponse, tags=["agents"])
 async def run_guided_intake_agent(
     request: GuidedIntakeRequest,
+    db: Session = Depends(get_db),
 ) -> GuidedIntakeResponse:
     """Run the guided contract intake agent against a completed extraction job."""
     try:
-        return agent_service.run_guided_intake(request)
+        return agent_service.run_guided_intake(db, request)
     except AgentConfigurationError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
