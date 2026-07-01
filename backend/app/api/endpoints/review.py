@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 import logging
 
 from app.db.database import get_db
+from app.core.tenancy import get_tenant_db
 from app.models.contract import Contract, contract_parties
 from app.models.party import Party
 from app.schemas.document import ReviewData, ReviewApprovalResponse
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 @router.post("/approve", response_model=ReviewApprovalResponse)
 def approve_extracted_data(
     review_data: ReviewData,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_tenant_db)
 ):
     """
     Review and approve extracted contract and party data.

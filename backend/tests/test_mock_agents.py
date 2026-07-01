@@ -1,18 +1,3 @@
-import pytest
-
-from app.core.auth import CurrentUser, get_current_user
-from app.main import app
-
-
-@pytest.fixture(autouse=True)
-def _as_test_user():
-    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
-        user_id="test-user", session_id="test-session"
-    )
-    yield
-    app.dependency_overrides.pop(get_current_user, None)
-
-
 def test_mock_agent_flow_offline(client):
     # Seed a mock extraction job
     job_resp = client.post("/api/documents/mock-job", json={"job_id": "mock-agent-job"})

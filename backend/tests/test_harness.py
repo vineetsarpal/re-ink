@@ -13,11 +13,16 @@ from datetime import date
 
 from sqlalchemy import text
 
+from app.core.tenancy import bind_session_to_org
 from app.models.contract import Contract
+
+# Contracts are RLS-protected, so harness probes bind an org before writing.
+PROBE_ORG = "org_harness_probe"
 
 
 def test_db_session_persists_and_reads_back(db_session) -> None:
     """The fixture yields a working, migrated Postgres session."""
+    bind_session_to_org(db_session, PROBE_ORG)
     contract = Contract(
         contract_number="TRACER-1",
         contract_name="Tracer Bullet",
@@ -42,6 +47,7 @@ def _make_contract(number: str) -> Contract:
 
 def test_isolation_writer(db_session) -> None:
     """Writing a marker row that the sibling test must never observe."""
+    bind_session_to_org(db_session, PROBE_ORG)
     assert db_session.query(Contract).filter_by(contract_number="ISO-1").count() == 0
     db_session.add(_make_contract("ISO-1"))
     db_session.flush()
@@ -65,6 +71,7 @@ def test_db_session_runs_as_restricted_role(db_session) -> None:
 
 def test_isolation_reader(db_session) -> None:
     """The marker row from the sibling test was rolled back, so it is absent."""
+    bind_session_to_org(db_session, PROBE_ORG)
     assert db_session.query(Contract).filter_by(contract_number="ISO-1").count() == 0
     db_session.add(_make_contract("ISO-1"))
     db_session.flush()
