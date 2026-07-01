@@ -203,12 +203,22 @@ def test_token_without_org_yields_none_org(rsa_keys):
     assert user.permissions == []
 
 
-def test_get_current_user_rejects_orgless_token(rsa_keys):
-    """Every authenticated request must resolve to an org; an orgless token is 401."""
+def test_get_current_user_rejects_orgless_token():
+    """Every resource request must resolve to an org; an orgless identity is 401."""
     from fastapi import HTTPException
+
+    from app.core.auth import CurrentUser, get_current_user
+
+    with pytest.raises(HTTPException) as exc:
+        get_current_user(CurrentUser(user_id="user_01H", org_id=None))
+    assert exc.value.status_code == 401
+
+
+def test_get_authenticated_user_accepts_orgless_token(rsa_keys):
+    """The orgless-allowed dependency returns the user (for the provisioning path)."""
     from fastapi.security import HTTPAuthorizationCredentials
 
-    from app.core.auth import get_current_user
+    from app.core.auth import get_authenticated_user
 
     private_pem, _ = rsa_keys
     now = int(time.time())
@@ -223,9 +233,9 @@ def test_get_current_user_rejects_orgless_token(rsa_keys):
     token = jwt.encode(claims, private_pem, algorithm="RS256", headers={"kid": KID})
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
 
-    with pytest.raises(HTTPException) as exc:
-        get_current_user(creds)
-    assert exc.value.status_code == 401
+    user = get_authenticated_user(creds)
+    assert user.user_id == "user_01H"
+    assert user.org_id is None
 
 
 def test_jwks_cache_avoids_repeated_fetches(monkeypatch):

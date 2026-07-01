@@ -158,6 +158,21 @@ export const widgetApi = {
   },
 };
 
+// Onboarding APIs
+export const onboardingApi = {
+  /**
+   * Ensure the signed-in user belongs to an organization. Called when the token
+   * carries no org_id; the backend creates a dedicated org (idempotently) and
+   * returns its id, which the caller then switches into to get an org-scoped token.
+   */
+  provisionOrganization: async (): Promise<{ organization_id: string }> => {
+    const response = await api.post<{ organization_id: string }>(
+      '/onboarding/provision-organization',
+    );
+    return response.data;
+  },
+};
+
 // System APIs
 export const systemApi = {
   /**
