@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
 
-from app.db.database import get_db
+from app.core.tenancy import get_tenant_db
 from app.models.party import Party
 from app.schemas.party import (
     PartyCreate, PartyUpdate, PartyResponse,
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 @router.post("/", response_model=PartyResponse, status_code=201)
 def create_party(
     party_data: PartyCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_tenant_db)
 ):
     """
     Create a new party (cedant, reinsurer, broker, etc.).
@@ -61,7 +61,7 @@ def list_parties(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     is_active: Optional[bool] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_tenant_db)
 ):
     """
     List all parties with optional filtering and pagination.
@@ -89,7 +89,7 @@ def list_parties(
 @router.post("/match", response_model=List[PartyMatchResult])
 def match_parties(
     request: PartyMatchRequest,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_tenant_db),
 ):
     """
     Fuzzy-match a list of extracted party names against existing parties.
@@ -131,7 +131,7 @@ def match_parties(
 
 
 @router.get("/{party_id}", response_model=PartyResponse)
-def get_party(party_id: int, db: Session = Depends(get_db)):
+def get_party(party_id: int, db: Session = Depends(get_tenant_db)):
     """
     Get a specific party by ID.
     """
@@ -153,7 +153,7 @@ def get_party(party_id: int, db: Session = Depends(get_db)):
 @router.get("/search/by-name")
 def search_parties_by_name(
     name: str = Query(..., min_length=2),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_tenant_db)
 ):
     """
     Search for parties by name (case-insensitive partial match).
@@ -174,7 +174,7 @@ def search_parties_by_name(
 def update_party(
     party_id: int,
     party_update: PartyUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_tenant_db)
 ):
     """
     Update an existing party.
@@ -205,7 +205,7 @@ def update_party(
 
 
 @router.delete("/{party_id}")
-def delete_party(party_id: int, db: Session = Depends(get_db)):
+def delete_party(party_id: int, db: Session = Depends(get_tenant_db)):
     """
     Delete a party (soft delete by setting is_active=False).
     """
