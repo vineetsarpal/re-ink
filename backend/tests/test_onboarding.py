@@ -15,13 +15,18 @@ from fastapi.testclient import TestClient
 
 import app.api.endpoints.onboarding as onboarding
 from app.core.auth import CurrentUser, get_authenticated_user
+from app.core.config import settings
 from app.main import app
 
 PROVISION_PATH = "/api/onboarding/provision-organization"
 
 
 @pytest.fixture
-def orgless_user():
+def orgless_user(monkeypatch):
+    # The provisioning endpoint requires WORKOS_API_KEY to be configured; set a
+    # dummy so tests don't depend on a local .env (CI has none). The WorkOS
+    # client itself is stubbed per test.
+    monkeypatch.setattr(settings, "WORKOS_API_KEY", "dummy-key")
     app.dependency_overrides[get_authenticated_user] = lambda: CurrentUser(
         user_id="user_new", org_id=None
     )
