@@ -104,10 +104,14 @@ def decode_and_validate(token: str) -> CurrentUser:
 _bearer = HTTPBearer(auto_error=False)
 
 
-def get_current_user(
+def get_authenticated_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
 ) -> CurrentUser:
-    """FastAPI dependency: validate the Bearer token or raise 401."""
+    """Validate the Bearer token or raise 401. Does NOT require an organization.
+
+    Used by the org-provisioning path, whose whole job is to serve a user who
+    has no org yet. Regular resource endpoints use ``get_current_user`` instead.
+    """
     if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -115,15 +119,23 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     try:
-        user = decode_and_validate(credentials.credentials)
+        return decode_and_validate(credentials.credentials)
     except AuthError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    # Every authenticated request must act within an organization (tenant); a
-    # token carrying no org has no tenant to scope to, so it is rejected.
+
+
+def get_current_user(
+    user: CurrentUser = Depends(get_authenticated_user),
+) -> CurrentUser:
+    """FastAPI dependency: a validated token that is scoped to an organization.
+
+    Every authenticated request must act within an organization (tenant); a
+    token carrying no org has no tenant to scope to, so it is rejected.
+    """
     if not user.org_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

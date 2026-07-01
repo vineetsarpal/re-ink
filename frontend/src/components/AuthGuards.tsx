@@ -11,7 +11,7 @@
 import React, { useEffect } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@workos-inc/authkit-react';
-import { registerAuth } from '@/services/api';
+import { registerAuth, onboardingApi } from '@/services/api';
 
 const center = {
   minHeight: '100vh',
@@ -59,10 +59,12 @@ const AuthError: React.FC = () => (
 
 /** Gate a protected route group: redirect to hosted sign-in when unauthenticated. */
 export const RequireAuth: React.FC = () => {
-  const { isLoading, user, signIn } = useAuth();
+  const { isLoading, user, signIn, organizationId, switchToOrganization } = useAuth();
   const location = useLocation();
   const signInStartedRef = React.useRef(false);
   const [looped, setLooped] = React.useState(false);
+  const provisionStartedRef = React.useRef(false);
+  const [provisionFailed, setProvisionFailed] = React.useState(false);
 
   useEffect(() => {
     if (isLoading) return;
@@ -85,11 +87,33 @@ export const RequireAuth: React.FC = () => {
     });
   }, [isLoading, location.hash, location.pathname, location.search, user, signIn]);
 
+  // A signed-in user with no organization gets a dedicated one provisioned, then
+  // switches into it so the token becomes org-scoped. Runs once per mount.
+  useEffect(() => {
+    if (isLoading || !user || organizationId) return;
+    if (provisionStartedRef.current) return;
+    provisionStartedRef.current = true;
+    void (async () => {
+      try {
+        const { organization_id } = await onboardingApi.provisionOrganization();
+        await switchToOrganization({ organizationId: organization_id });
+      } catch {
+        setProvisionFailed(true);
+      }
+    })();
+  }, [isLoading, user, organizationId, switchToOrganization]);
+
   if (looped) {
     return <AuthError />;
   }
   if (isLoading || !user) {
     return <Loading label="Loading…" />;
+  }
+  if (provisionFailed) {
+    return <AuthError />;
+  }
+  if (!organizationId) {
+    return <Loading label="Setting up your workspace…" />;
   }
   return <Outlet />;
 };

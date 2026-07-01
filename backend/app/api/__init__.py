@@ -1,7 +1,7 @@
 """API router configuration."""
 from fastapi import APIRouter, Depends
 
-from app.api.endpoints import agents, contracts, parties, documents, review, system, widgets
+from app.api.endpoints import agents, contracts, parties, documents, onboarding, review, system, widgets
 from app.core.auth import get_current_user
 
 api_router = APIRouter()
@@ -52,4 +52,11 @@ api_router.include_router(
     prefix="/widgets",
     tags=["widgets"],
     dependencies=_auth,
+)
+# No _auth here: provisioning must serve users who have no org yet, so it
+# authenticates via get_authenticated_user (orgless-allowed) internally.
+api_router.include_router(
+    onboarding.router,
+    prefix="/onboarding",
+    tags=["onboarding"],
 )
