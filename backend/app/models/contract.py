@@ -17,6 +17,13 @@ contract_parties = Table(
     Column('contract_id', Integer, ForeignKey('contracts.id'), primary_key=True),
     Column('party_id', Integer, ForeignKey('parties.id'), primary_key=True),
     Column('role', String(50)),  # Role of party in this contract (e.g., "cedant", "reinsurer")
+    # org_id is stamped from the app.current_org GUC so raw inserts need not set it.
+    Column(
+        'org_id',
+        String(255),
+        nullable=False,
+        server_default=text("current_setting('app.current_org', true)"),
+    ),
     Column('created_at', DateTime(timezone=True), server_default=func.now())
 )
 
