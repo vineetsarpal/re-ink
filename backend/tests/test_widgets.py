@@ -11,7 +11,6 @@ import sys
 from pathlib import Path
 
 # Configure environment before importing application modules
-os.environ.setdefault("DATABASE_URL", "sqlite:///./test_widgets.db")
 os.environ.setdefault("LANDINGAI_API_KEY", "dummy-key")
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]

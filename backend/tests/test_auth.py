@@ -15,7 +15,6 @@ import time
 from pathlib import Path
 
 # Configure environment before importing application modules
-os.environ.setdefault("DATABASE_URL", "sqlite:///./test_auth.db")
 os.environ.setdefault("LANDINGAI_API_KEY", "dummy-key")
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
