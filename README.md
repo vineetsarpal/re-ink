@@ -17,8 +17,10 @@ re-ink is a full-stack web application that streamlines reinsurance contract man
 - 🤖 **AI Extraction**: Automatic extraction of contract terms and parties using LandingAI
 - ✅ **Review Workflow**: Review and edit AI-extracted data before creating records
 - 🔎 **Source-Grounded Review**: Every extracted field links back to the passage and page it came from, so reviewers can verify AI output at a glance
+- 🔐 **WorkOS Authentication**: AuthKit sign-in, org-scoped API access, and automatic organization provisioning for new users
 - 📊 **Contract Management**: Full CRUD operations for reinsurance contracts
 - 👥 **Party Management**: Manage parties (cedants, reinsurers, brokers)
+- 🔁 **Party Deduplication**: Fuzzy-match extracted party names to existing records before approval
 - 🔍 **Search & Filter**: Find contracts and parties quickly
 - 📈 **Dashboard**: Overview of contracts and parties with statistics
 - 🧪 **Sample Extraction Mode**: Seed mock data to test the workflow without LandingAI
@@ -37,15 +39,21 @@ Two sample PDFs are bundled with the frontend and available directly in the Uplo
 - **SQLAlchemy**: ORM for database operations
 - **PostgreSQL**: Relational database
 - **LandingAI**: Agentic document extraction API
+- **WorkOS**: Authentication, organizations, and account widgets
 - **Alembic**: Database migrations
+- **LangChain/LangGraph**: Guided intake and automated contract review agents
 
 ### Frontend
 - **React 18**: UI framework
 - **TypeScript**: Type-safe JavaScript
 - **Vite**: Fast build tool
 - **React Router**: Client-side routing
-- **React Query**: Server state management
+- **TanStack React Query**: Server state management
 - **Axios**: HTTP client
+- **WorkOS AuthKit & Widgets**: Hosted auth and self-service account UI
+- **pdf.js**: Source document preview with field-level bounding boxes
+- **React Hook Form**: Review form state management
+- **Lucide React**: Icon library
 
 ## Architecture
 
@@ -53,7 +61,7 @@ Two sample PDFs are bundled with the frontend and available directly in the Uplo
 ┌────────────────────────────────────────────────────────────────────────────┐
 │                              USER / BROWSER                                │
 └───────────────────────────────┬────────────────────────────────────────────┘
-                                │
+                                │  WorkOS AuthKit session
                     ┌───────────▼───────────┐
                     │     React Frontend    │
                     │  - Upload & Review UI │
@@ -66,6 +74,7 @@ Two sample PDFs are bundled with the frontend and available directly in the Uplo
                     │ /api/documents        │
                     │ /api/review           │
                     │ /api/agents           │
+                    │ /api/widgets          │
                     └───┬──────────────┬────┘
                         │              │
                 ┌───────▼───┐      ┌───▼───────────────┐
@@ -84,6 +93,7 @@ Two sample PDFs are bundled with the frontend and available directly in the Uplo
         │ PostgreSQL                  │◄┼────────────┤ LangChain LLM   │
         │ - Contracts & Parties       │ │  prompts   │  (OpenAI, Ollama│
         │ - Extraction Jobs           │ │            │   or offline)   │
+        │ - Tenant-scoped data        │ │            │                 │
         └─────────────────────────────┘ │            └─────────────────┘
                                         │
                             (insights returned to frontend)
@@ -116,7 +126,8 @@ Use `make backend-dev` or `make frontend-dev` to run either side individually, a
 - Python 3.13+ (uv can install this for you)
 - Node.js 18+
 - PostgreSQL 12+
-- LandingAI API key
+- WorkOS AuthKit application/client ID
+- LandingAI API key, either in `backend/.env` or supplied in the Upload UI
 
 ### Backend Setup
 
@@ -174,12 +185,16 @@ re-ink/
 ├── backend/                  # FastAPI backend
 │   ├── app/
 │   │   ├── api/             # API endpoints
+│   │   ├── agents/          # LangChain/LangGraph agent implementations
 │   │   ├── core/            # Configuration (reads VERSION file)
 │   │   ├── db/              # Database setup
 │   │   ├── models/          # SQLAlchemy models (Contract, Party, ExtractionJob)
 │   │   ├── schemas/         # Pydantic schemas
 │   │   ├── services/        # Business logic
 │   │   └── main.py          # Application entry
+│   ├── alembic/             # Database migrations
+│   ├── scripts/             # Utility scripts
+│   ├── tests/               # Backend test suite
 │   └── pyproject.toml
 ├── frontend/                 # React frontend
 │   ├── public/
@@ -196,20 +211,25 @@ re-ink/
 
 ## Workflow
 
-1. **Upload**: User uploads a reinsurance contract document (PDF or DOCX)
-2. **Extract**: System sends document to LandingAI for AI-powered extraction
-3. **Process**: AI extracts contract details, dates, financial terms, and party information
-4. **Review**: User reviews and edits the extracted data in a user-friendly form, with source evidence showing the page/passage behind each grounded field
-5. **Approve**: User approves the data, creating Contract and Party records
-6. **Manage**: Contracts and parties can be viewed, searched, and managed
+1. **Sign in**: User authenticates through WorkOS AuthKit; API requests are scoped to the active organization
+2. **Upload**: User uploads a reinsurance contract document (PDF or DOCX), or selects a bundled sample
+3. **Extract**: System sends document to LandingAI for AI-powered extraction, unless sample extraction mode is used
+4. **Process**: AI extracts contract details, dates, financial terms, party information, and source evidence
+5. **Review**: User reviews and edits extracted data, verifies grounded fields against the source PDF, and links likely duplicate parties
+6. **Approve**: User approves the data, creating Contract and Party records
+7. **Manage**: Contracts and parties can be viewed, searched, and managed
 
 ## API Endpoints
+
+All `/api/*` resource endpoints require a WorkOS Bearer token, except `/api/onboarding/provision-organization`, which accepts an authenticated user before they have an organization so it can provision one. Public health endpoints are available at `/` and `/health`.
 
 ### Documents
 - `POST /api/documents/upload` - Upload a document and start extraction in the background
 - `GET /api/documents/status/{job_id}` - Check extraction status (supports `processing`, `completed`, `failed`)
 - `GET /api/documents/results/{job_id}` - Retrieve parsed extraction results when a job is complete
 - `GET /api/documents/file/{job_id}` - Stream the original uploaded document for the review preview panel (404 for mock jobs)
+- `DELETE /api/documents/{job_id}` - Delete a document and its extraction job
+- `POST /api/documents/mock-job` - Seed a mock extraction job for local testing without LandingAI
 
 ### Contracts
 - `GET /api/contracts/` - List contracts (supports `status`, `contract_type`, `skip`, `limit` filters)
@@ -218,11 +238,13 @@ re-ink/
 - `PUT /api/contracts/{id}` - Update contract fields
 - `DELETE /api/contracts/{id}` - Soft delete a contract
 - `POST /api/contracts/{id}/parties/{party_id}` - Link a party to a contract with a role
+- `PATCH /api/contracts/{id}/parties/{party_id}` - Update a linked party's contract role
 - `DELETE /api/contracts/{id}/parties/{party_id}` - Remove a party association from a contract
 
 ### Parties
 - `GET /api/parties/` - List parties (supports `is_active`, `skip`, `limit`)
 - `POST /api/parties/` - Create a party
+- `POST /api/parties/match` - Fuzzy-match extracted party names against existing parties
 - `GET /api/parties/{id}` - Get party details
 - `PUT /api/parties/{id}` - Update party fields
 - `DELETE /api/parties/{id}` - Soft delete a party
@@ -239,6 +261,12 @@ re-ink/
 ### System
 - `GET /api/system/config` - Return agent configuration flags (e.g., offline mode) for the frontend
 
+### Widgets
+- `POST /api/widgets/user-profile/token` - Mint a WorkOS User Profile widget token for the signed-in user
+
+### Onboarding
+- `POST /api/onboarding/provision-organization` - Ensure a signed-in user belongs to an organization, creating one if needed
+
 ## Development
 
  See detailed development guides:
@@ -252,7 +280,7 @@ re-ink/
 ```env
 DATABASE_URL=postgresql://user:password@localhost:5432/reink_db
 WORKOS_CLIENT_ID=client_...
-WORKOS_API_KEY=sk_...             # Optional; not needed for access-token validation
+WORKOS_API_KEY=sk_...             # Required for account widgets and org provisioning; not needed for access-token validation
 LANDINGAI_API_KEY=your_landingai_api_key   # Optional — users can supply their own key in the UI (BYOK)
 LANDINGAI_PARSE_URL=https://api.va.landing.ai/v1/ade/parse
 LANDINGAI_EXTRACT_URL=https://api.va.landing.ai/v1/ade/extract
@@ -264,7 +292,7 @@ ALLOWED_ORIGINS=["http://localhost:3000","http://localhost:5173"]
 LOG_LEVEL=INFO
 LLM_PROVIDER=openai               # "openai" or "ollama"
 OPENAI_API_KEY=your_openai_key    # Only needed when LLM_PROVIDER=openai
-AGENT_MODEL=gpt-4o-mini
+AGENT_MODEL=gpt-4o
 AGENT_TEMPERATURE=0.1
 AGENT_OFFLINE_MODE=false          # Set true to skip LLM calls entirely
 OLLAMA_BASE_URL=http://localhost:11434  # Only needed when LLM_PROVIDER=ollama
@@ -273,6 +301,7 @@ OLLAMA_MODEL=llama3.1
 
 - `LANDINGAI_API_KEY` is optional on the server — users can enter their own key directly in the Upload UI (BYOK). If neither is set, the upload will be rejected with a clear error.
 - `WORKOS_CLIENT_ID` drives WorkOS issuer and JWKS validation for protected API routes.
+- `WORKOS_API_KEY` is required for server-side WorkOS calls, including User Profile widget tokens and automatic organization provisioning.
 - `LLM_PROVIDER` selects the agent LLM backend; set `AGENT_OFFLINE_MODE=true` to skip LLM calls entirely.
 - `ALLOWED_ORIGINS` supports JSON array notation (shown above) or a comma-separated list. In production, set this to your deployed frontend URL.
 - The app version is read from the `VERSION` file at the repo root — do not set `APP_VERSION` in `.env`.
@@ -283,6 +312,8 @@ OLLAMA_MODEL=llama3.1
 VITE_API_BASE_URL=http://localhost:8000/api
 VITE_WORKOS_CLIENT_ID=client_...
 VITE_WORKOS_REDIRECT_URI=http://localhost:3000/auth/callback
+# Optional when using a WorkOS custom authentication domain
+VITE_WORKOS_API_HOSTNAME=auth.example.com
 ```
 
 ## License

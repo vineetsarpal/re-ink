@@ -9,6 +9,9 @@ FastAPI backend for the re-ink reinsurance contract management system.
 - **Contract Management**: Full CRUD operations for reinsurance contracts
 - **Party Management**: Manage parties (cedants, reinsurers, brokers)
 - **Review Workflow**: Review and approve AI-extracted data before creation
+- **Source Grounding**: Return page, bounding box, and source text evidence for extracted fields
+- **WorkOS Auth & Tenancy**: Validate AuthKit access tokens and scope resource queries to the caller's organization
+- **Agents**: LangChain/LangGraph guided intake and automated contract review
 
 ## Setup
 
@@ -17,6 +20,8 @@ FastAPI backend for the re-ink reinsurance contract management system.
 - [uv](https://docs.astral.sh/uv/) (Python package & project manager)
 - Python 3.13+ (uv can install this for you)
 - PostgreSQL 12+
+- WorkOS AuthKit client ID
+- LandingAI API key, either in `backend/.env` or supplied by users in the Upload UI
 
 ### Installation
 
@@ -85,6 +90,7 @@ backend/
 │   ├── services/         # Business logic
 │   └── main.py           # FastAPI application
 ├── alembic/              # Database migrations
+├── scripts/              # Utility scripts
 ├── tests/                # Test files
 ├── pyproject.toml        # Project metadata & dependencies (uv)
 └── uv.lock               # Pinned dependency lockfile
@@ -92,30 +98,48 @@ backend/
 
 ## API Endpoints
 
+All `/api/*` resource endpoints require a WorkOS Bearer token, except `/api/onboarding/provision-organization`, which authenticates a signed-in user before they have an organization so it can provision one.
+
 ### Documents
-- `POST /api/documents/upload` - Upload a document for extraction
+- `POST /api/documents/upload` - Upload a document and start extraction in the background
 - `GET /api/documents/status/{job_id}` - Get extraction status
-- `GET /api/documents/results/{job_id}` - Get extraction results
+- `GET /api/documents/results/{job_id}` - Get extraction results with field source evidence
+- `GET /api/documents/file/{job_id}` - Stream the original uploaded document for preview
 - `DELETE /api/documents/{job_id}` - Delete a document
+- `POST /api/documents/mock-job` - Seed a mock extraction job for local testing without LandingAI
+- `GET /api/documents/test-mock-data` - Return static mock extraction data for frontend checks
 
 ### Contracts
-- `GET /api/contracts/` - List all contracts
+- `GET /api/contracts/` - List all contracts, with `status`, `contract_type`, `skip`, and `limit` filters
 - `POST /api/contracts/` - Create a new contract
 - `GET /api/contracts/{id}` - Get contract details
 - `PUT /api/contracts/{id}` - Update a contract
-- `DELETE /api/contracts/{id}` - Delete a contract
+- `DELETE /api/contracts/{id}` - Soft delete a contract
+- `POST /api/contracts/{id}/parties/{party_id}` - Link a party to a contract with a role
+- `PATCH /api/contracts/{id}/parties/{party_id}` - Update a linked party's role
+- `DELETE /api/contracts/{id}/parties/{party_id}` - Remove a party association from a contract
 
 ### Parties
-- `GET /api/parties/` - List all parties
+- `GET /api/parties/` - List all parties, with `is_active`, `skip`, and `limit` filters
 - `POST /api/parties/` - Create a new party
+- `POST /api/parties/match` - Fuzzy-match extracted party names against existing parties
 - `GET /api/parties/{id}` - Get party details
 - `PUT /api/parties/{id}` - Update a party
-- `DELETE /api/parties/{id}` - Delete a party
+- `DELETE /api/parties/{id}` - Soft delete a party
 - `GET /api/parties/search/by-name` - Search parties by name
 
 ### Review
 - `POST /api/review/approve` - Approve and create extracted data
 - `POST /api/review/reject/{job_id}` - Reject extraction
+
+### Agents
+- `POST /api/agents/intake` - Run the guided intake agent for an extraction job
+- `POST /api/agents/review` - Generate an automated review for a contract
+
+### System, Widgets, and Onboarding
+- `GET /api/system/config` - Return runtime flags needed by the frontend
+- `POST /api/widgets/user-profile/token` - Mint a WorkOS User Profile widget token
+- `POST /api/onboarding/provision-organization` - Ensure a signed-in user has an organization
 
 ## Database Migrations
 
@@ -162,8 +186,8 @@ Key environment variables:
 
 - `DATABASE_URL` - PostgreSQL connection string
 - `WORKOS_CLIENT_ID` - WorkOS client ID used to derive token issuer and JWKS URL
-- `WORKOS_API_KEY` - Optional WorkOS API key for server-side WorkOS calls; not required for access-token validation
-- `LANDINGAI_API_KEY` - LandingAI API key
+- `WORKOS_API_KEY` - Required for server-side WorkOS calls such as User Profile widget tokens and organization provisioning; not required for access-token validation
+- `LANDINGAI_API_KEY` - Optional server-side LandingAI API key; users can also supply their own key in the Upload UI
 - `LANDINGAI_PARSE_URL` - LandingAI Parse API endpoint (default: https://api.va.landing.ai/v1/ade/parse)
 - `LANDINGAI_EXTRACT_URL` - LandingAI Extract API endpoint (default: https://api.va.landing.ai/v1/ade/extract)
 - `LANDINGAI_PARSE_MODEL` - Parse model version (default: dpt-2-latest)
@@ -172,6 +196,14 @@ Key environment variables:
 - `LOG_LEVEL` - Logging level (default: INFO)
 - `MAX_UPLOAD_SIZE` - Maximum file upload size (bytes)
 - `UPLOAD_DIR` - Directory for storing uploaded files
+- `ALLOWED_EXTENSIONS` - Upload extensions accepted by the backend (default: `.pdf`, `.docx`)
+- `LLM_PROVIDER` - Agent LLM backend, either `openai` or `ollama`
+- `OPENAI_API_KEY` - OpenAI key required when `LLM_PROVIDER=openai`
+- `AGENT_MODEL` - OpenAI model for agents (default: `gpt-4o`)
+- `AGENT_TEMPERATURE` - Agent model temperature (default: `0.1`)
+- `AGENT_OFFLINE_MODE` - Skip LLM calls and return deterministic local agent output
+- `OLLAMA_BASE_URL` - Ollama server URL when using the Ollama provider
+- `OLLAMA_MODEL` - Ollama model name (default: `llama3.1`)
 
 ### Troubleshooting
 

@@ -7,6 +7,9 @@ React frontend for the re-ink reinsurance contract management system.
 - **Document Upload**: Drag-and-drop interface for uploading contracts
 - **Extraction Monitoring**: Real-time status updates for AI extraction
 - **Review Interface**: Review and edit extracted contract data
+- **Source Document Preview**: Render PDFs with field-level source grounding overlays
+- **WorkOS Authentication**: Protected app routes using AuthKit sessions
+- **Account Widgets**: Self-service profile, security, and session management via WorkOS widgets
 - **Contract Dashboard**: View and manage all contracts
 - **Party Management**: Browse and search parties
 - **Sample Extraction Mode**: Seed mock data to exercise the workflow without LandingAI
@@ -19,6 +22,7 @@ React frontend for the re-ink reinsurance contract management system.
 
 - Node.js 18+
 - npm or yarn
+- WorkOS AuthKit client ID and redirect URI
 
 ### Installation
 
@@ -30,7 +34,7 @@ npm install
 2. Set up environment variables:
 ```bash
 cp .env.example .env
-# Edit .env with your configuration
+# Edit .env with your backend URL and WorkOS AuthKit settings
 ```
 
 ### Running the Development Server
@@ -47,6 +51,16 @@ The application will be available at http://localhost:3000
 - On the Upload page click **Use Sample Extraction**. The frontend calls `POST /api/documents/mock-job` and jumps straight to the review step with mock contract data.
 - Proceed through the guided review and approval flows exactly as if LandingAI had processed a real document.
 - After approval, open the contract detail page and click **Generate AI Review** to request a fresh compliance summary on demand.
+
+### Environment Variables
+
+```env
+VITE_API_BASE_URL=http://localhost:8000/api
+VITE_WORKOS_CLIENT_ID=your-workos-client-id
+VITE_WORKOS_REDIRECT_URI=http://localhost:3000/auth/callback
+# Optional when using a WorkOS custom authentication domain.
+VITE_WORKOS_API_HOSTNAME=auth.example.com
+```
 
 ### Building for Production
 
@@ -81,8 +95,11 @@ frontend/
 - **React 18** - UI framework
 - **TypeScript** - Type safety
 - **React Router** - Client-side routing
-- **React Query** - Server state management
+- **TanStack React Query** - Server state management
 - **Axios** - HTTP client
+- **WorkOS AuthKit React** - Authentication
+- **WorkOS Widgets** - Account management widgets
+- **pdf.js** - PDF rendering for source-grounded review
 - **React Hook Form** - Form handling
 - **Lucide React** - Icon library
 - **Vite** - Build tool
@@ -97,6 +114,15 @@ Displays extraction status with polling for real-time updates.
 
 ### ReviewForm
 Allows users to review and edit AI-extracted contract and party data before creating records.
+
+### DocumentPreview
+Renders the source PDF and overlays the bounding boxes that ground extracted fields.
+
+### AuthGuards
+Protects app routes, bridges WorkOS access tokens into the API client, and provisions an organization for orgless users.
+
+### AccountPanel
+Hosts the WorkOS self-service widgets from the sidebar account menu.
 
 ### Dashboard
 Main landing page showing contracts and parties overview with quick stats.
