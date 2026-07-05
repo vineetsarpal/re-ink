@@ -270,6 +270,7 @@ All `/api/*` resource endpoints require a WorkOS Bearer token, except `/api/onbo
 ## Development
 
  See detailed development guides:
+- [User Guide](docs/user-guide/README.md)
 - [Backend README](backend/README.md)
 - [Frontend README](frontend/README.md)
 - [CLAUDE.md](CLAUDE.md) - Development guidance for Claude Code
