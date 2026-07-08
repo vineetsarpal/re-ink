@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 import logging
 
 from app.db.database import get_db
+from app.core.auth import require_permission
 from app.core.tenancy import get_tenant_db
 from app.models.contract import Contract, contract_parties
 from app.models.party import Party
@@ -18,7 +19,8 @@ logger = logging.getLogger(__name__)
 @router.post("/approve", response_model=ReviewApprovalResponse)
 def approve_extracted_data(
     review_data: ReviewData,
-    db: Session = Depends(get_tenant_db)
+    db: Session = Depends(get_tenant_db),
+    _user=Depends(require_permission("review.approve")),
 ):
     """
     Review and approve extracted contract and party data.
@@ -158,7 +160,8 @@ def approve_extracted_data(
 def reject_extracted_data(
     job_id: str,
     reason: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _user=Depends(require_permission("review.approve")),
 ):
     """
     Reject extracted data and provide a reason.

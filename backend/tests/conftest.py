@@ -137,6 +137,18 @@ def db_session(restricted_engine):
 
 
 DEFAULT_TEST_ORG = "org_test_default"
+ADMIN_PERMISSIONS = [
+    "contract.read",
+    "contract.write",
+    "contract.delete",
+    "party.read",
+    "party.write",
+    "party.delete",
+    "document.upload",
+    "review.approve",
+    "member.manage",
+    "sso.manage",
+]
 
 
 @pytest.fixture()
@@ -160,7 +172,10 @@ def client(db_session):
         yield db_session
 
     app.dependency_overrides[get_current_user] = lambda: CurrentUser(
-        user_id="test-user", org_id=DEFAULT_TEST_ORG
+        user_id="test-user",
+        org_id=DEFAULT_TEST_ORG,
+        role="admin",
+        permissions=ADMIN_PERMISSIONS,
     )
     app.dependency_overrides[get_db] = _get_test_db
     app.dependency_overrides[get_tenant_db] = _get_test_db
@@ -188,7 +203,10 @@ def as_org(db_session):
 
     def _act_as(org_id: str) -> TestClient:
         app.dependency_overrides[get_current_user] = lambda: CurrentUser(
-            user_id="test-user", org_id=org_id
+            user_id="test-user",
+            org_id=org_id,
+            role="admin",
+            permissions=ADMIN_PERMISSIONS,
         )
 
         def _tenant_db():

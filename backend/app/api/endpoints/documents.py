@@ -9,7 +9,7 @@ import logging
 
 from app.core.config import settings
 from app.db.database import SessionLocal
-from app.core.auth import CurrentUser, get_current_user
+from app.core.auth import CurrentUser, get_current_user, require_permission
 from app.core.tenancy import bind_session_to_org, get_tenant_db
 from app.schemas.document import (
     DocumentUploadResponse,
@@ -33,6 +33,7 @@ async def upload_document(
     api_key: Optional[str] = Form(None),
     db: Session = Depends(get_tenant_db),
     user: CurrentUser = Depends(get_current_user),
+    _permission=Depends(require_permission("document.upload")),
 ):
     """
     Upload a reinsurance contract document for processing.
@@ -130,7 +131,11 @@ async def process_document_extraction(
 
 
 @router.get("/status/{job_id}", response_model=DocumentExtractionStatus)
-async def get_extraction_status(job_id: str, db: Session = Depends(get_tenant_db)):
+async def get_extraction_status(
+    job_id: str,
+    db: Session = Depends(get_tenant_db),
+    _user=Depends(require_permission("document.upload")),
+):
     """
     Get the status of a document extraction job.
 
@@ -165,7 +170,11 @@ async def get_extraction_status(job_id: str, db: Session = Depends(get_tenant_db
 
 
 @router.get("/results/{job_id}", response_model=ExtractionResult)
-async def get_extraction_results(job_id: str, db: Session = Depends(get_tenant_db)):
+async def get_extraction_results(
+    job_id: str,
+    db: Session = Depends(get_tenant_db),
+    _user=Depends(require_permission("document.upload")),
+):
     """
     Get the extracted data for a completed job.
     """
@@ -195,7 +204,11 @@ async def get_extraction_results(job_id: str, db: Session = Depends(get_tenant_d
 
 
 @router.get("/file/{job_id}")
-async def get_source_document(job_id: str, db: Session = Depends(get_tenant_db)):
+async def get_source_document(
+    job_id: str,
+    db: Session = Depends(get_tenant_db),
+    _user=Depends(require_permission("document.upload")),
+):
     """
     Stream the original uploaded document for a job, for the review preview
     panel. Returns 404 when the file is unavailable (e.g. mock jobs, which
@@ -227,7 +240,11 @@ async def get_source_document(job_id: str, db: Session = Depends(get_tenant_db))
 
 
 @router.delete("/{job_id}")
-async def delete_document(job_id: str, db: Session = Depends(get_tenant_db)):
+async def delete_document(
+    job_id: str,
+    db: Session = Depends(get_tenant_db),
+    _user=Depends(require_permission("document.upload")),
+):
     """
     Delete a document and its associated extraction data.
     """
@@ -245,7 +262,8 @@ async def delete_document(job_id: str, db: Session = Depends(get_tenant_db)):
 @router.post("/mock-job", response_model=DocumentExtractionStatus)
 async def seed_mock_job(
     payload: Optional[dict] = None,
-    db: Session = Depends(get_tenant_db)
+    db: Session = Depends(get_tenant_db),
+    _user=Depends(require_permission("document.upload")),
 ):
     """
     Seed a mock extraction job for testing (skips LandingAI).
@@ -434,7 +452,9 @@ async def seed_mock_job(
 
 
 @router.get("/test-mock-data", response_model=ExtractionResult)
-async def get_mock_extraction_data():
+async def get_mock_extraction_data(
+    _user=Depends(require_permission("document.upload")),
+):
     """
     Test endpoint that returns mock extraction data to verify frontend works correctly.
     """
