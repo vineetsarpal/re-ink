@@ -21,6 +21,32 @@ class ProvisionOrganizationResponse(BaseModel):
     organization_id: str
 
 
+def _email_domain(email: str) -> str | None:
+    """Return the normalized domain part of an email address."""
+    if "@" not in email:
+        return None
+    domain = email.rsplit("@", 1)[1].strip().lower()
+    return domain or None
+
+
+def _domain_state_value(domain) -> str | None:  # noqa: ANN001
+    state = getattr(domain, "state", None)
+    return getattr(state, "value", state)
+
+
+def _verified_domain_orgs(orgs, domain: str) -> list:  # noqa: ANN001
+    matches = []
+    for org in orgs:
+        for org_domain in getattr(org, "domains", []):
+            if (
+                getattr(org_domain, "domain", "").lower() == domain
+                and _domain_state_value(org_domain) == "verified"
+            ):
+                matches.append(org)
+                break
+    return matches
+
+
 def _workos_client() -> WorkOSClient:
     """Build a server-side WorkOS client. Seam for tests to patch."""
     return WorkOSClient(
@@ -52,8 +78,21 @@ def provision_organization(
         )
 
     workos_user = client.user_management.get_user(user.user_id)
+    domain = _email_domain(workos_user.email)
+    if domain:
+        verified_orgs = _verified_domain_orgs(
+            client.organizations.list_organizations(domains=[domain]).data,
+            domain,
+        )
+        if len(verified_orgs) == 1:
+            org = verified_orgs[0]
+            client.organization_membership.create_organization_membership(
+                user_id=user.user_id, organization_id=org.id, role="viewer"
+            )
+            return ProvisionOrganizationResponse(organization_id=org.id)
+
     org = client.organizations.create_organization(name=workos_user.email)
     client.organization_membership.create_organization_membership(
-        user_id=user.user_id, organization_id=org.id
+        user_id=user.user_id, organization_id=org.id, role="admin"
     )
     return ProvisionOrganizationResponse(organization_id=org.id)

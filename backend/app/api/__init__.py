@@ -1,7 +1,17 @@
 """API router configuration."""
 from fastapi import APIRouter, Depends
 
-from app.api.endpoints import agents, contracts, parties, documents, onboarding, review, system, widgets
+from app.api.endpoints import (
+    admin,
+    agents,
+    contracts,
+    documents,
+    onboarding,
+    parties,
+    review,
+    system,
+    widgets,
+)
 from app.core.auth import get_current_user
 
 api_router = APIRouter()
@@ -39,6 +49,12 @@ api_router.include_router(
     agents.router,
     prefix="/agents",
     tags=["agents"],
+    dependencies=_auth,
+)
+api_router.include_router(
+    admin.router,
+    prefix="/admin",
+    tags=["admin"],
     dependencies=_auth,
 )
 api_router.include_router(
