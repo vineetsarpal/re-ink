@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
 
+from app.core.auth import require_permission
 from app.core.tenancy import get_tenant_db
 from app.models.contract import Contract, contract_parties
 from app.models.party import Party
@@ -184,7 +185,11 @@ def update_contract(
 
 
 @router.delete("/{contract_id}")
-def delete_contract(contract_id: int, db: Session = Depends(get_tenant_db)):
+def delete_contract(
+    contract_id: int,
+    db: Session = Depends(get_tenant_db),
+    _user=Depends(require_permission("contract.delete")),
+):
     """
     Delete a contract (soft delete by setting is_active=False).
     """

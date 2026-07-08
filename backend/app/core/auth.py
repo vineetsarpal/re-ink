@@ -143,3 +143,17 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
+
+
+def require_permission(permission: str):
+    """Require a WorkOS permission claim on the current user."""
+
+    def _require_permission(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+        if permission not in user.permissions:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission denied",
+            )
+        return user
+
+    return _require_permission

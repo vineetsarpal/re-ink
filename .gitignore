@@ -65,6 +65,9 @@ htmlcov/
 .pytest_cache/
 .tox/
 
+# Local
+.tokensave
+
 # Alembic
 alembic/versions/*.pyc
 
