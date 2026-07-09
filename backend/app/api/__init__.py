@@ -6,6 +6,7 @@ from app.api.endpoints import (
     agents,
     contracts,
     documents,
+    members,
     onboarding,
     parties,
     review,
@@ -37,6 +38,12 @@ api_router.include_router(
     parties.router,
     prefix="/parties",
     tags=["parties"],
+    dependencies=_auth,
+)
+api_router.include_router(
+    members.router,
+    prefix="/members",
+    tags=["members"],
     dependencies=_auth,
 )
 api_router.include_router(
