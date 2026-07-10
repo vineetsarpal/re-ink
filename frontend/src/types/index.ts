@@ -201,3 +201,14 @@ export type PartyType = 'cedant' | 'reinsurer' | 'broker' | 'other';
 export interface SystemConfig {
   agent_offline_mode: boolean;
 }
+
+export type OrganizationRole = 'admin' | 'member' | 'viewer';
+
+export interface OrganizationMember {
+  id: string;
+  user_id: string;
+  email?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  role: OrganizationRole;
+}

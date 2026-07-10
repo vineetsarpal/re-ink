@@ -16,6 +16,8 @@ import type {
   AutomatedReviewResponse,
   AgentChatMessage,
   SystemConfig,
+  OrganizationMember,
+  OrganizationRole,
 } from '@/types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
@@ -170,6 +172,31 @@ export const onboardingApi = {
       '/onboarding/provision-organization',
     );
     return response.data;
+  },
+};
+
+export const membersApi = {
+  list: async (): Promise<OrganizationMember[]> => {
+    const response = await api.get<{ members: OrganizationMember[] }>('/members/');
+    return response.data.members;
+  },
+  invite: async (email: string, role: OrganizationRole): Promise<void> => {
+    await api.post('/members/invitations', { email, role });
+  },
+  updateRole: async (membershipId: string, role: OrganizationRole): Promise<void> => {
+    await api.patch(`/members/${membershipId}`, { role });
+  },
+  remove: async (membershipId: string): Promise<void> => {
+    await api.delete(`/members/${membershipId}`);
+  },
+};
+
+export type AdminPortalIntent = 'sso' | 'dsync' | 'domain_verification';
+
+export const adminApi = {
+  getPortalLink: async (intent: AdminPortalIntent): Promise<string> => {
+    const response = await api.post<{ url: string }>('/admin/portal-link', { intent });
+    return response.data.url;
   },
 };
 

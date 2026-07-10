@@ -4,11 +4,13 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '@workos-inc/authkit-react';
 import { ArrowLeft, Building2, Mail, MapPin, FileText, Calendar, Edit2, Save, X, Trash2 } from 'lucide-react';
 import { partyApi } from '@/services/api';
 import type { Party } from '@/types';
 
 export const PartyDetailPage: React.FC = () => {
+  const { permissions } = useAuth();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -207,7 +209,7 @@ export const PartyDetailPage: React.FC = () => {
           </div>
         </div>
         <div className="header-actions" style={{ display: 'flex', gap: '0.75rem' }}>
-          {isEditing ? (
+          {isEditing ? permissions.includes('party.write') && (
             <>
               <button
                 onClick={handleSave}
@@ -228,18 +230,18 @@ export const PartyDetailPage: React.FC = () => {
             </>
           ) : (
             <>
-              <button onClick={handleEdit} className="btn btn-secondary">
+              {permissions.includes('party.write') && <button onClick={handleEdit} className="btn btn-secondary">
                 <Edit2 size={16} />
                 Edit
-              </button>
-              <button
+              </button>}
+              {permissions.includes('party.delete') && <button
                 onClick={handleDelete}
                 className="btn btn-danger"
                 disabled={deleteMutation.isPending}
               >
                 <Trash2 size={16} />
                 {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
-              </button>
+              </button>}
             </>
           )}
         </div>

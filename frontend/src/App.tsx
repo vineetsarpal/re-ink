@@ -11,8 +11,11 @@ import { ContractsPage } from './pages/ContractsPage';
 import { ContractDetailPage } from './pages/ContractDetailPage';
 import { PartiesPage } from './pages/PartiesPage';
 import { PartyDetailPage } from './pages/PartyDetailPage';
+import { MembersPage } from './pages/MembersPage';
+import { OrganizationSettingsPage } from './pages/OrganizationSettingsPage';
 import { Layout } from './components/Layout';
 import { RequireAuth, AuthCallback, AuthBridge, LoginRoute } from './components/AuthGuards';
+import { RequirePermission } from './components/RequirePermission';
 import './styles/App.css';
 
 // Create a query client for React Query
@@ -40,11 +43,19 @@ const App: React.FC = () => {
           <Route element={<RequireAuth />}>
             <Route element={<Layout />}>
               <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/upload" element={<UploadPage />} />
+              <Route element={<RequirePermission permission="document.upload" />}>
+                <Route path="/upload" element={<UploadPage />} />
+              </Route>
               <Route path="/contracts" element={<ContractsPage />} />
               <Route path="/contracts/:id" element={<ContractDetailPage />} />
               <Route path="/parties" element={<PartiesPage />} />
               <Route path="/parties/:id" element={<PartyDetailPage />} />
+              <Route element={<RequirePermission permission="member.manage" />}>
+                <Route path="/members" element={<MembersPage />} />
+              </Route>
+              <Route element={<RequirePermission permission="sso.manage" />}>
+                <Route path="/organization-settings" element={<OrganizationSettingsPage />} />
+              </Route>
             </Route>
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

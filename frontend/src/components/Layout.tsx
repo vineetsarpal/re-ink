@@ -20,6 +20,7 @@ import {
   PanelLeft,
   LogOut,
   X,
+  Settings,
 } from 'lucide-react';
 import { useAuth } from '@workos-inc/authkit-react';
 import { SecondarySidebarProvider } from '@/components/SecondarySidebar';
@@ -40,7 +41,7 @@ const displayVersion = __APP_VERSION__.split('.').slice(0, 2).join('.');
 
 export const Layout: React.FC = () => {
   const location = useLocation();
-  const { user, signOut } = useAuth();
+  const { user, signOut, permissions } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false);
@@ -171,7 +172,7 @@ export const Layout: React.FC = () => {
         </div>
 
         <ul className="nav-menu">
-          {NAV_ITEMS.map(({ to, label, Icon }) => (
+          {NAV_ITEMS.filter(({ to }) => to !== '/upload' || permissions.includes('document.upload')).map(({ to, label, Icon }) => (
             <li key={to}>
               <Link
                 to={to}
@@ -183,6 +184,12 @@ export const Layout: React.FC = () => {
               </Link>
             </li>
           ))}
+          {permissions.includes('member.manage') && (
+            <li><Link to="/members" className={`nav-link ${isActive('/members') ? 'active' : ''}`} title={navCollapsed ? 'Members' : undefined}><Users size={20} /><span>Members</span></Link></li>
+          )}
+          {permissions.includes('sso.manage') && (
+            <li><Link to="/organization-settings" className={`nav-link ${isActive('/organization-settings') ? 'active' : ''}`} title={navCollapsed ? 'Organization settings' : undefined}><Settings size={20} /><span>Organization settings</span></Link></li>
+          )}
         </ul>
 
         <div className="sidebar-footer">

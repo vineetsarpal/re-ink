@@ -4,6 +4,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '@workos-inc/authkit-react';
 import {
   ArrowLeft,
   Calendar,
@@ -21,6 +22,7 @@ import { agentApi, contractApi } from '@/services/api';
 import type { AutomatedReviewResponse, ContractWithParties } from '@/types';
 
 export const ContractDetailPage: React.FC = () => {
+  const { permissions } = useAuth();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -297,7 +299,7 @@ export const ContractDetailPage: React.FC = () => {
           </div>
         </div>
         <div className="header-actions" style={{ display: 'flex', gap: '0.75rem' }}>
-          {isEditing ? (
+          {isEditing ? permissions.includes('contract.write') && (
             <>
               <button
                 onClick={handleSave}
@@ -318,18 +320,18 @@ export const ContractDetailPage: React.FC = () => {
             </>
           ) : (
             <>
-              <button onClick={handleEdit} className="btn btn-secondary">
+              {permissions.includes('contract.write') && <button onClick={handleEdit} className="btn btn-secondary">
                 <Edit2 size={16} />
                 Edit
-              </button>
-              <button
+              </button>}
+              {permissions.includes('contract.delete') && <button
                 onClick={handleDelete}
                 className="btn btn-danger"
                 disabled={deleteMutation.isPending}
               >
                 <Trash2 size={16} />
                 {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
-              </button>
+              </button>}
             </>
           )}
         </div>
