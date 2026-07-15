@@ -138,16 +138,16 @@ def db_session(restricted_engine):
 
 DEFAULT_TEST_ORG = "org_test_default"
 ADMIN_PERMISSIONS = [
-    "contract.read",
-    "contract.write",
-    "contract.delete",
-    "party.read",
-    "party.write",
-    "party.delete",
-    "document.upload",
-    "review.approve",
-    "member.manage",
-    "sso.manage",
+    "contract:read",
+    "contract:write",
+    "contract:delete",
+    "party:read",
+    "party:write",
+    "party:delete",
+    "document:upload",
+    "review:approve",
+    "member:manage",
+    "sso:manage",
 ]
 
 

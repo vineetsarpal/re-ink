@@ -43,17 +43,16 @@ const App: React.FC = () => {
           <Route element={<RequireAuth />}>
             <Route element={<Layout />}>
               <Route path="/dashboard" element={<Dashboard />} />
-              <Route element={<RequirePermission permission="document.upload" />}>
-                <Route path="/upload" element={<UploadPage />} />
-              </Route>
+              {/* Temporary WorkOS RBAC bypass; authentication still applies. */}
+              <Route path="/upload" element={<UploadPage />} />
               <Route path="/contracts" element={<ContractsPage />} />
               <Route path="/contracts/:id" element={<ContractDetailPage />} />
               <Route path="/parties" element={<PartiesPage />} />
               <Route path="/parties/:id" element={<PartyDetailPage />} />
-              <Route element={<RequirePermission permission="member.manage" />}>
+              <Route element={<RequirePermission permission="member:manage" />}>
                 <Route path="/members" element={<MembersPage />} />
               </Route>
-              <Route element={<RequirePermission permission="sso.manage" />}>
+              <Route element={<RequirePermission permission="sso:manage" />}>
                 <Route path="/organization-settings" element={<OrganizationSettingsPage />} />
               </Route>
             </Route>

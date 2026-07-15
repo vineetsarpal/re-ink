@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 def create_party(
     party_data: PartyCreate,
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("party.write")),
+    _user=Depends(require_permission("party:write")),
 ):
     """
     Create a new party (cedant, reinsurer, broker, etc.).
@@ -64,7 +64,7 @@ def list_parties(
     limit: int = Query(100, ge=1, le=1000),
     is_active: Optional[bool] = None,
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("party.read")),
+    _user=Depends(require_permission("party:read")),
 ):
     """
     List all parties with optional filtering and pagination.
@@ -93,7 +93,7 @@ def list_parties(
 def match_parties(
     request: PartyMatchRequest,
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("party.read")),
+    _user=Depends(require_permission("party:read")),
 ):
     """
     Fuzzy-match a list of extracted party names against existing parties.
@@ -138,7 +138,7 @@ def match_parties(
 def get_party(
     party_id: int,
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("party.read")),
+    _user=Depends(require_permission("party:read")),
 ):
     """
     Get a specific party by ID.
@@ -162,7 +162,7 @@ def get_party(
 def search_parties_by_name(
     name: str = Query(..., min_length=2),
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("party.read")),
+    _user=Depends(require_permission("party:read")),
 ):
     """
     Search for parties by name (case-insensitive partial match).
@@ -184,7 +184,7 @@ def update_party(
     party_id: int,
     party_update: PartyUpdate,
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("party.write")),
+    _user=Depends(require_permission("party:write")),
 ):
     """
     Update an existing party.
@@ -218,7 +218,7 @@ def update_party(
 def delete_party(
     party_id: int,
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("party.delete")),
+    _user=Depends(require_permission("party:delete")),
 ):
     """
     Delete a party (soft delete by setting is_active=False).

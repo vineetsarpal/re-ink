@@ -14,23 +14,24 @@ from fastapi.testclient import TestClient
 from app.core.auth import CurrentUser, get_current_user
 from app.core.tenancy import bind_session_to_org, get_tenant_db
 from app.main import app
+from app.models.extraction_job import ExtractionJob
 
 
 ORG_ID = "org_permission_test"
-VIEWER_PERMISSIONS = ["contract.read", "party.read"]
+VIEWER_PERMISSIONS = ["contract:read", "party:read"]
 MEMBER_PERMISSIONS = [
     *VIEWER_PERMISSIONS,
-    "contract.write",
-    "party.write",
-    "document.upload",
-    "review.approve",
+    "contract:write",
+    "party:write",
+    "document:upload",
+    "review:approve",
 ]
 ADMIN_PERMISSIONS = [
     *MEMBER_PERMISSIONS,
-    "contract.delete",
-    "party.delete",
-    "member.manage",
-    "sso.manage",
+    "contract:delete",
+    "party:delete",
+    "member:manage",
+    "sso:manage",
 ]
 
 
@@ -86,7 +87,7 @@ def _review_payload(number: str) -> dict:
 def test_contract_create_requires_contract_write_permission(db_session) -> None:
     try:
         client = _client_as(
-            db_session, role="viewer", permissions=["contract.read"]
+            db_session, role="viewer", permissions=["contract:read"]
         )
 
         denied = client.post("/api/contracts/", json=_contract_payload("PERM-WRITE"))
@@ -99,12 +100,12 @@ def test_contract_create_requires_contract_write_permission(db_session) -> None:
 def test_contract_list_requires_contract_read_permission(db_session) -> None:
     try:
         writer = _client_as(
-            db_session, role="member", permissions=["contract.write"]
+            db_session, role="member", permissions=["contract:write"]
         )
         created = writer.post("/api/contracts/", json=_contract_payload("PERM-READ"))
         assert created.status_code == 201, created.text
 
-        no_read = _client_as(db_session, role="member", permissions=["contract.write"])
+        no_read = _client_as(db_session, role="member", permissions=["contract:write"])
         denied = no_read.get("/api/contracts/")
 
         assert denied.status_code == 403
@@ -114,7 +115,7 @@ def test_contract_list_requires_contract_read_permission(db_session) -> None:
 
 def test_party_create_requires_party_write_permission(db_session) -> None:
     try:
-        client = _client_as(db_session, role="viewer", permissions=["party.read"])
+        client = _client_as(db_session, role="viewer", permissions=["party:read"])
 
         denied = client.post("/api/parties/", json=_party_payload("Read Only Cedant"))
 
@@ -123,18 +124,54 @@ def test_party_create_requires_party_write_permission(db_session) -> None:
         _clear_overrides()
 
 
-def test_document_upload_requires_document_upload_permission(db_session) -> None:
+def test_document_upload_does_not_require_document_upload_permission(db_session) -> None:
     try:
         client = _client_as(
-            db_session, role="viewer", permissions=["contract.read", "party.read"]
+            db_session, role="viewer", permissions=["contract:read", "party:read"]
         )
 
-        denied = client.post(
+        response = client.post(
             "/api/documents/upload",
             files={"file": ("contract.pdf", BytesIO(b"%PDF-1.4"), "application/pdf")},
         )
 
-        assert denied.status_code == 403
+        # A viewer can start an upload despite not having the temporary-bypassed
+        # WorkOS permission.
+        assert response.status_code == 200
+    finally:
+        _clear_overrides()
+
+
+def test_mock_extraction_flow_does_not_require_document_upload_permission(db_session) -> None:
+    try:
+        client = _client_as(db_session, role="viewer", permissions=VIEWER_PERMISSIONS)
+        job_id = "viewer-mock-job"
+
+        assert client.post("/api/documents/mock-job", json={"job_id": job_id}).status_code == 200
+        assert client.get(f"/api/documents/status/{job_id}").status_code == 200
+        assert client.get(f"/api/documents/results/{job_id}").status_code == 200
+    finally:
+        _clear_overrides()
+
+
+def test_uploaded_document_status_and_results_still_require_document_upload_permission(
+    db_session,
+) -> None:
+    try:
+        client = _client_as(db_session, role="viewer", permissions=VIEWER_PERMISSIONS)
+        db_session.add(
+            ExtractionJob(
+                job_id="viewer-real-job",
+                status="completed",
+                filename="real-contract.pdf",
+                file_path="/uploads/real-contract.pdf",
+                parsed_results={},
+            )
+        )
+        db_session.flush()
+
+        assert client.get("/api/documents/status/viewer-real-job").status_code == 403
+        assert client.get("/api/documents/results/viewer-real-job").status_code == 403
     finally:
         _clear_overrides()
 
@@ -144,7 +181,7 @@ def test_review_approve_requires_review_approve_permission(db_session) -> None:
         client = _client_as(
             db_session,
             role="viewer",
-            permissions=["contract.read", "party.read"],
+            permissions=["contract:read", "party:read"],
         )
 
         denied = client.post("/api/review/approve", json=_review_payload("PERM-APPROVE"))
@@ -156,7 +193,7 @@ def test_review_approve_requires_review_approve_permission(db_session) -> None:
 
 def test_automated_review_agent_requires_contract_read_permission(db_session) -> None:
     try:
-        client = _client_as(db_session, role="member", permissions=["contract.write"])
+        client = _client_as(db_session, role="member", permissions=["contract:write"])
 
         denied = client.post(
             "/api/agents/review",
@@ -181,7 +218,6 @@ def test_automated_review_agent_requires_contract_read_permission(db_session) ->
         ("post", "/api/parties/match", {"json": {"names": ["Cedant Co"]}}),
         ("put", "/api/parties/12345", {"json": {"name": "Updated Party"}}),
         ("delete", "/api/parties/12345", {}),
-        ("post", "/api/documents/mock-job", {"json": {"job_id": "forbidden-job"}}),
         ("delete", "/api/documents/forbidden-job", {}),
         ("post", "/api/review/reject/forbidden-job?reason=bad", {}),
         (
@@ -210,7 +246,10 @@ def test_role_permission_sets_match_resource_behavior(db_session) -> None:
         assert viewer.get("/api/contracts/").status_code == 200
         assert viewer.get("/api/parties/").status_code == 200
         assert viewer.get("/api/parties/search/by-name?name=cedant").status_code == 200
-        assert viewer.post("/api/documents/mock-job", json={"job_id": "viewer-job"}).status_code == 403
+        mock_job_id = "viewer-job"
+        assert viewer.post("/api/documents/mock-job", json={"job_id": mock_job_id}).status_code == 200
+        assert viewer.get(f"/api/documents/status/{mock_job_id}").status_code == 200
+        assert viewer.get(f"/api/documents/results/{mock_job_id}").status_code == 200
         assert viewer.post("/api/review/approve", json=_review_payload("VIEWER-DENY")).status_code == 403
 
         member = _client_as(db_session, role="member", permissions=MEMBER_PERMISSIONS)
@@ -234,7 +273,7 @@ def test_role_permission_sets_match_resource_behavior(db_session) -> None:
 
 def test_contract_delete_requires_contract_delete_permission(db_session) -> None:
     try:
-        writer = _client_as(db_session, role="member", permissions=["contract.write"])
+        writer = _client_as(db_session, role="member", permissions=["contract:write"])
         created = writer.post("/api/contracts/", json=_contract_payload("PERM-1"))
         assert created.status_code == 201, created.text
 
@@ -250,11 +289,11 @@ def test_contract_delete_allows_any_role_with_contract_delete_permission(
     db_session,
 ) -> None:
     try:
-        writer = _client_as(db_session, role="member", permissions=["contract.write"])
+        writer = _client_as(db_session, role="member", permissions=["contract:write"])
         created = writer.post("/api/contracts/", json=_contract_payload("PERM-2"))
         assert created.status_code == 201, created.text
 
-        client = _client_as(db_session, role="viewer", permissions=["contract.delete"])
+        client = _client_as(db_session, role="viewer", permissions=["contract:delete"])
         allowed = client.delete(f"/api/contracts/{created.json()['id']}")
 
         assert allowed.status_code == 200

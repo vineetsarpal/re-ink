@@ -181,11 +181,11 @@ Frontend will be available at http://localhost:3000
 
 Roles and permissions are defined **environment-level in the WorkOS dashboard**, not in code — the API only enforces the permission claims WorkOS puts on the access token. Configure this once per WorkOS environment before role enforcement works:
 
-1. **Create permissions**: `contract.read`, `contract.write`, `contract.delete`, `party.read`, `party.write`, `party.delete`, `document.upload`, `review.approve`, `member.manage`, `sso.manage`.
+1. **Create permissions**: `contract:read`, `contract:write`, `contract:delete`, `party:read`, `party:write`, `party:delete`, `document:upload`, `review:approve`, `member:manage`, `sso:manage`.
 2. **Create roles** and assign permissions:
    - `viewer` — all `*.read`
-   - `member` — `viewer` + all `*.write` + `document.upload` + `review.approve`
-   - `admin` — `member` + all `*.delete` + `member.manage` + `sso.manage`
+   - `member` — `viewer` + all `*:write` + `document:upload` + `review:approve`
+   - `admin` — `member` + all `*:delete` + `member:manage` + `sso:manage`
 3. **Set `viewer` as the environment default role** (applied to domain-claim auto-joins and SSO/JIT users).
 4. **(Deferred) Enable directory group role assignment** — only needed once a customer connects a SCIM/Google Workspace directory, so their IdP groups can map to roles. Turn on when the first such tenant onboards; note that IdP group→role mappings override roles assigned via the API or dashboard.
 

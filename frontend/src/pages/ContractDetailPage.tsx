@@ -299,7 +299,7 @@ export const ContractDetailPage: React.FC = () => {
           </div>
         </div>
         <div className="header-actions" style={{ display: 'flex', gap: '0.75rem' }}>
-          {isEditing ? permissions.includes('contract.write') && (
+          {isEditing ? permissions.includes('contract:write') && (
             <>
               <button
                 onClick={handleSave}
@@ -320,11 +320,11 @@ export const ContractDetailPage: React.FC = () => {
             </>
           ) : (
             <>
-              {permissions.includes('contract.write') && <button onClick={handleEdit} className="btn btn-secondary">
+              {permissions.includes('contract:write') && <button onClick={handleEdit} className="btn btn-secondary">
                 <Edit2 size={16} />
                 Edit
               </button>}
-              {permissions.includes('contract.delete') && <button
+              {permissions.includes('contract:delete') && <button
                 onClick={handleDelete}
                 className="btn btn-danger"
                 disabled={deleteMutation.isPending}

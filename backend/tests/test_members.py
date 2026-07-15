@@ -93,7 +93,7 @@ def test_members_list_returns_hydrated_members(monkeypatch) -> None:
             ),
         ]
         monkeypatch.setattr(members, "_workos_client", lambda: wos)
-        client = _client_as(permissions=["member.manage"])
+        client = _client_as(permissions=["member:manage"])
 
         resp = client.get(MEMBERS_PATH)
 
@@ -136,7 +136,7 @@ def test_member_invite_sends_workos_invitation_with_selected_role(monkeypatch) -
         wos.user_management.send_invitation.return_value.organization_id = "org_members"
         wos.user_management.send_invitation.return_value.role_slug = "viewer"
         monkeypatch.setattr(members, "_workos_client", lambda: wos)
-        client = _client_as(permissions=["member.manage"])
+        client = _client_as(permissions=["member:manage"])
 
         resp = client.post(
             f"{MEMBERS_PATH}/invitations",
@@ -171,7 +171,7 @@ def test_member_invite_defaults_to_member_role(monkeypatch) -> None:
         wos.user_management.send_invitation.return_value.organization_id = "org_members"
         wos.user_management.send_invitation.return_value.role_slug = "member"
         monkeypatch.setattr(members, "_workos_client", lambda: wos)
-        client = _client_as(permissions=["member.manage"])
+        client = _client_as(permissions=["member:manage"])
 
         resp = client.post(
             f"{MEMBERS_PATH}/invitations",
@@ -203,7 +203,7 @@ def test_member_role_update_changes_membership_role(monkeypatch) -> None:
             _membership("om_member", "user_member", "admin")
         )
         monkeypatch.setattr(members, "_workos_client", lambda: wos)
-        client = _client_as(permissions=["member.manage"])
+        client = _client_as(permissions=["member:manage"])
 
         resp = client.patch(f"{MEMBERS_PATH}/om_member", json={"role": "admin"})
 
@@ -227,7 +227,7 @@ def test_member_role_update_rejects_demoting_last_admin(monkeypatch) -> None:
             _membership("om_member", "user_member", "member"),
         ]
         monkeypatch.setattr(members, "_workos_client", lambda: wos)
-        client = _client_as(permissions=["member.manage"])
+        client = _client_as(permissions=["member:manage"])
 
         resp = client.patch(f"{MEMBERS_PATH}/om_admin", json={"role": "member"})
 
@@ -248,7 +248,7 @@ def test_member_remove_deletes_membership(monkeypatch) -> None:
             _membership("om_member", "user_member", "member"),
         ]
         monkeypatch.setattr(members, "_workos_client", lambda: wos)
-        client = _client_as(permissions=["member.manage"])
+        client = _client_as(permissions=["member:manage"])
 
         resp = client.delete(f"{MEMBERS_PATH}/om_member")
 
@@ -272,7 +272,7 @@ def test_member_remove_rejects_removing_last_admin(monkeypatch) -> None:
             _membership("om_member", "user_member", "member"),
         ]
         monkeypatch.setattr(members, "_workos_client", lambda: wos)
-        client = _client_as(permissions=["member.manage"])
+        client = _client_as(permissions=["member:manage"])
 
         resp = client.delete(f"{MEMBERS_PATH}/om_admin")
 
@@ -295,7 +295,7 @@ def test_member_remove_allows_self_removal_when_another_admin_remains(
             _membership("om_admin_other", "user_other", "admin"),
         ]
         monkeypatch.setattr(members, "_workos_client", lambda: wos)
-        client = _client_as(user_id="user_admin", permissions=["member.manage"])
+        client = _client_as(user_id="user_admin", permissions=["member:manage"])
 
         resp = client.delete(f"{MEMBERS_PATH}/om_admin_self")
 

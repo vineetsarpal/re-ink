@@ -26,6 +26,18 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _is_mock_job(job: ExtractionJob) -> bool:
+    """Return whether a job was created by the offline sample-extraction flow."""
+    return bool((job.raw_results or {}).get("metadata", {}).get("is_mock"))
+
+
+def _require_document_access_for_job(job: Optional[ExtractionJob], user: CurrentUser) -> None:
+    """Allow mock jobs for authenticated tenant users; protect real uploads by role."""
+    if "document:upload" not in user.permissions and not (job and _is_mock_job(job)):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+
+# Temporary: retain authentication and tenant scoping while WorkOS RBAC is repaired.
 @router.post("/upload", response_model=DocumentUploadResponse)
 async def upload_document(
     background_tasks: BackgroundTasks,
@@ -33,7 +45,6 @@ async def upload_document(
     api_key: Optional[str] = Form(None),
     db: Session = Depends(get_tenant_db),
     user: CurrentUser = Depends(get_current_user),
-    _permission=Depends(require_permission("document.upload")),
 ):
     """
     Upload a reinsurance contract document for processing.
@@ -134,7 +145,7 @@ async def process_document_extraction(
 async def get_extraction_status(
     job_id: str,
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("document.upload")),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """
     Get the status of a document extraction job.
@@ -144,6 +155,7 @@ async def get_extraction_status(
     - Extracted data if completed
     """
     job = db.query(ExtractionJob).filter(ExtractionJob.job_id == job_id).first()
+    _require_document_access_for_job(job, user)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -173,12 +185,13 @@ async def get_extraction_status(
 async def get_extraction_results(
     job_id: str,
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("document.upload")),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """
     Get the extracted data for a completed job.
     """
     job = db.query(ExtractionJob).filter(ExtractionJob.job_id == job_id).first()
+    _require_document_access_for_job(job, user)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -207,7 +220,7 @@ async def get_extraction_results(
 async def get_source_document(
     job_id: str,
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("document.upload")),
+    _user=Depends(require_permission("document:upload")),
 ):
     """
     Stream the original uploaded document for a job, for the review preview
@@ -243,7 +256,7 @@ async def get_source_document(
 async def delete_document(
     job_id: str,
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("document.upload")),
+    _user=Depends(require_permission("document:upload")),
 ):
     """
     Delete a document and its associated extraction data.
@@ -263,7 +276,7 @@ async def delete_document(
 async def seed_mock_job(
     payload: Optional[dict] = None,
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("document.upload")),
+    _user: CurrentUser = Depends(get_current_user),
 ):
     """
     Seed a mock extraction job for testing (skips LandingAI).
@@ -435,6 +448,7 @@ async def seed_mock_job(
         filename=mock_parsed["extraction_metadata"]["filename"],
         file_path="",
         message="Mock extraction completed",
+        raw_results={"metadata": {"is_mock": True}},
         parsed_results=mock_parsed,
         completed_at=datetime.now(timezone.utc),
     )
@@ -453,7 +467,7 @@ async def seed_mock_job(
 
 @router.get("/test-mock-data", response_model=ExtractionResult)
 async def get_mock_extraction_data(
-    _user=Depends(require_permission("document.upload")),
+    _user=Depends(require_permission("document:upload")),
 ):
     """
     Test endpoint that returns mock extraction data to verify frontend works correctly.

@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 def create_contract(
     contract_data: ContractCreate,
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("contract.write")),
+    _user=Depends(require_permission("contract:write")),
 ):
     """
     Create a new contract.
@@ -89,7 +89,7 @@ def list_contracts(
     status: Optional[str] = None,
     contract_type: Optional[str] = None,
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("contract.read")),
+    _user=Depends(require_permission("contract:read")),
 ):
     """
     List all contracts with optional filtering and pagination.
@@ -117,7 +117,7 @@ def list_contracts(
 def get_contract(
     contract_id: int,
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("contract.read")),
+    _user=Depends(require_permission("contract:read")),
 ):
     """
     Get a specific contract by ID, including associated parties.
@@ -161,7 +161,7 @@ def update_contract(
     contract_id: int,
     contract_update: ContractUpdate,
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("contract.write")),
+    _user=Depends(require_permission("contract:write")),
 ):
     """
     Update an existing contract.
@@ -195,7 +195,7 @@ def update_contract(
 def delete_contract(
     contract_id: int,
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("contract.delete")),
+    _user=Depends(require_permission("contract:delete")),
 ):
     """
     Delete a contract (soft delete by setting is_active=False).
@@ -227,7 +227,7 @@ def add_party_to_contract(
     party_id: int,
     role: str = Query(..., description="Role of party in this contract"),
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("contract.write")),
+    _user=Depends(require_permission("contract:write")),
 ):
     """
     Associate a party with a contract.
@@ -273,7 +273,7 @@ def update_party_role(
     party_id: int,
     role: str = Query(..., description="New role for the party on this contract"),
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("contract.write")),
+    _user=Depends(require_permission("contract:write")),
 ):
     """
     Update the role of a party on a specific contract.
@@ -302,7 +302,7 @@ def remove_party_from_contract(
     contract_id: int,
     party_id: int,
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("contract.write")),
+    _user=Depends(require_permission("contract:write")),
 ):
     """
     Remove a party association from a contract.

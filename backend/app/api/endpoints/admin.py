@@ -34,7 +34,7 @@ def _workos_client() -> WorkOSClient:
 @router.post("/portal-link", response_model=AdminPortalLinkResponse)
 def create_admin_portal_link(
     request: AdminPortalLinkRequest,
-    user: CurrentUser = Depends(require_permission("sso.manage")),
+    user: CurrentUser = Depends(require_permission("sso:manage")),
 ) -> AdminPortalLinkResponse:
     """Mint a WorkOS Admin Portal link for the caller's organization."""
     if not settings.WORKOS_API_KEY:

@@ -119,7 +119,7 @@ def _configured_client() -> WorkOSClient:
 
 @router.get("/", response_model=MembersListResponse)
 def list_members(
-    user: CurrentUser = Depends(require_permission("member.manage")),
+    user: CurrentUser = Depends(require_permission("member:manage")),
 ) -> MembersListResponse:
     """List members in the caller's organization."""
     client = _configured_client()
@@ -132,7 +132,7 @@ def list_members(
 @router.post("/invitations", response_model=InviteMemberResponse, status_code=201)
 def invite_member(
     request: InviteMemberRequest,
-    user: CurrentUser = Depends(require_permission("member.manage")),
+    user: CurrentUser = Depends(require_permission("member:manage")),
 ) -> InviteMemberResponse:
     """Invite a user into the caller's organization with a chosen role."""
     invitation = _configured_client().user_management.send_invitation(
@@ -153,7 +153,7 @@ def invite_member(
 def update_member_role(
     membership_id: str,
     request: UpdateMemberRoleRequest,
-    user: CurrentUser = Depends(require_permission("member.manage")),
+    user: CurrentUser = Depends(require_permission("member:manage")),
 ) -> MemberResponse:
     """Change an organization member's role."""
     client = _configured_client()
@@ -173,7 +173,7 @@ def update_member_role(
 @router.delete("/{membership_id}", response_model=RemoveMemberResponse)
 def remove_member(
     membership_id: str,
-    user: CurrentUser = Depends(require_permission("member.manage")),
+    user: CurrentUser = Depends(require_permission("member:manage")),
 ) -> RemoveMemberResponse:
     """Remove an organization member."""
     client = _configured_client()

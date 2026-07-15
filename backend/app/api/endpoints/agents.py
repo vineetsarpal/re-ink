@@ -21,7 +21,7 @@ router = APIRouter()
 async def run_guided_intake_agent(
     request: GuidedIntakeRequest,
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("document.upload")),
+    _user=Depends(require_permission("document:upload")),
 ) -> GuidedIntakeResponse:
     """Run the guided contract intake agent against a completed extraction job."""
     try:
@@ -34,7 +34,7 @@ async def run_guided_intake_agent(
 def run_automated_review_agent(
     request: AutomatedReviewRequest,
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("contract.read")),
+    _user=Depends(require_permission("contract:read")),
 ) -> AutomatedReviewResponse:
     """Generate an automated review for an existing contract."""
     try:

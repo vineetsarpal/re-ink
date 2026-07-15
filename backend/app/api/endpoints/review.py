@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 def approve_extracted_data(
     review_data: ReviewData,
     db: Session = Depends(get_tenant_db),
-    _user=Depends(require_permission("review.approve")),
+    _user=Depends(require_permission("review:approve")),
 ):
     """
     Review and approve extracted contract and party data.
@@ -161,7 +161,7 @@ def reject_extracted_data(
     job_id: str,
     reason: str,
     db: Session = Depends(get_db),
-    _user=Depends(require_permission("review.approve")),
+    _user=Depends(require_permission("review:approve")),
 ):
     """
     Reject extracted data and provide a reason.

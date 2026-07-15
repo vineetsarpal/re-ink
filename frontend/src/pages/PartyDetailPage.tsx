@@ -209,7 +209,7 @@ export const PartyDetailPage: React.FC = () => {
           </div>
         </div>
         <div className="header-actions" style={{ display: 'flex', gap: '0.75rem' }}>
-          {isEditing ? permissions.includes('party.write') && (
+          {isEditing ? permissions.includes('party:write') && (
             <>
               <button
                 onClick={handleSave}
@@ -230,11 +230,11 @@ export const PartyDetailPage: React.FC = () => {
             </>
           ) : (
             <>
-              {permissions.includes('party.write') && <button onClick={handleEdit} className="btn btn-secondary">
+              {permissions.includes('party:write') && <button onClick={handleEdit} className="btn btn-secondary">
                 <Edit2 size={16} />
                 Edit
               </button>}
-              {permissions.includes('party.delete') && <button
+              {permissions.includes('party:delete') && <button
                 onClick={handleDelete}
                 className="btn btn-danger"
                 disabled={deleteMutation.isPending}

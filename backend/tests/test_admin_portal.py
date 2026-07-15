@@ -55,7 +55,7 @@ def test_admin_portal_link_passes_intent_to_workos(monkeypatch, intent: str) -> 
             f"https://workos.test/admin/{intent}"
         )
         monkeypatch.setattr(admin, "_workos_client", lambda: wos)
-        client = _client_as(permissions=["sso.manage"])
+        client = _client_as(permissions=["sso:manage"])
 
         resp = client.post(PORTAL_LINK_PATH, json={"intent": intent})
 
