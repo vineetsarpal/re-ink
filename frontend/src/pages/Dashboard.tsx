@@ -1,11 +1,14 @@
 /**
  * Dashboard page - main landing page showing contracts and parties overview.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { createColumnHelper, flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table';
 import { FileText, Users, Plus, TrendingUp } from 'lucide-react';
 import { contractApi, partyApi } from '@/services/api';
 import type { Contract, Party } from '@/types';
+
+const contractColumnHelper = createColumnHelper<Contract>();
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -48,6 +51,37 @@ export const Dashboard: React.FC = () => {
       setIsLoading(false);
     }
   };
+
+
+  const contractColumns = useMemo(() => [
+    contractColumnHelper.accessor('contract_number', { header: 'Contract Number' }),
+    contractColumnHelper.accessor('contract_name', { header: 'Name' }),
+    contractColumnHelper.accessor('contract_type', {
+      header: 'Type',
+      cell: ({ getValue }) => getValue() || 'N/A',
+    }),
+    contractColumnHelper.accessor('status', {
+      header: 'Status',
+      cell: ({ getValue }) => <span className={`status-badge status-${getValue()}`}>{getValue()}</span>,
+    }),
+    contractColumnHelper.accessor('effective_date', {
+      header: 'Effective Date',
+      cell: ({ getValue }) => new Date(getValue()).toLocaleDateString(),
+    }),
+    contractColumnHelper.display({
+      id: 'premium',
+      header: 'Premium',
+      cell: ({ row }) => row.original.premium_amount
+        ? `${row.original.currency} ${row.original.premium_amount.toLocaleString()}`
+        : 'N/A',
+    }),
+  ], []);
+
+  const contractsTable = useReactTable({
+    data: contracts,
+    columns: contractColumns,
+    getCoreRowModel: getCoreRowModel(),
+  });
 
   return (
     <div className="dashboard">
@@ -128,36 +162,26 @@ export const Dashboard: React.FC = () => {
           <div className="contracts-table">
             <table>
               <thead>
-                <tr>
-                  <th>Contract Number</th>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Status</th>
-                  <th>Effective Date</th>
-                  <th>Premium</th>
-                </tr>
+                {contractsTable.getHeaderGroups().map((headerGroup) => (
+                  <tr key={headerGroup.id}>
+                    {headerGroup.headers.map((header) => (
+                      <th key={header.id}>
+                        {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                      </th>
+                    ))}
+                  </tr>
+                ))}
               </thead>
               <tbody>
-                {contracts.map((contract) => (
+                {contractsTable.getRowModel().rows.map((row) => (
                   <tr
-                    key={contract.id}
-                    onClick={() => navigate(`/contracts/${contract.id}`)}
+                    key={row.id}
+                    onClick={() => navigate(`/contracts/${row.original.id}`)}
                     className="clickable"
                   >
-                    <td>{contract.contract_number}</td>
-                    <td>{contract.contract_name}</td>
-                    <td>{contract.contract_type || 'N/A'}</td>
-                    <td>
-                      <span className={`status-badge status-${contract.status}`}>
-                        {contract.status}
-                      </span>
-                    </td>
-                    <td>{new Date(contract.effective_date).toLocaleDateString()}</td>
-                    <td>
-                      {contract.premium_amount
-                        ? `${contract.currency} ${contract.premium_amount.toLocaleString()}`
-                        : 'N/A'}
-                    </td>
+                    {row.getVisibleCells().map((cell) => (
+                      <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
+                    ))}
                   </tr>
                 ))}
               </tbody>

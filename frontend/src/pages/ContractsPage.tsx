@@ -1,11 +1,18 @@
 /**
  * ContractsPage - List and manage all contracts.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { createColumnHelper, flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table';
 import { Search, Filter, Plus } from 'lucide-react';
 import { contractApi } from '@/services/api';
 import type { Contract } from '@/types';
+
+const contractColumnHelper = createColumnHelper<Contract>();
+
+const formatContractSubType = (subType?: string) => subType
+  ? subType.split('_').map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
+  : 'N/A';
 
 export const ContractsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -38,6 +45,54 @@ export const ContractsPage: React.FC = () => {
       contract.contract_name.toLowerCase().includes(searchTerm.toLowerCase());
     // Show all contracts including inactive ones (is_active field will be indicated by badge)
     return matchesSearch;
+  });
+
+
+  const contractColumns = useMemo(() => [
+    contractColumnHelper.accessor('contract_number', { header: 'Contract Number' }),
+    contractColumnHelper.accessor('contract_name', { header: 'Name' }),
+    contractColumnHelper.accessor('contract_type', {
+      header: 'Type',
+      cell: ({ getValue }) => getValue() || 'N/A',
+    }),
+    contractColumnHelper.accessor('contract_sub_type', {
+      header: 'Sub-Type',
+      cell: ({ getValue }) => formatContractSubType(getValue()),
+    }),
+    contractColumnHelper.display({
+      id: 'status',
+      header: 'Status',
+      cell: ({ row }) => !row.original.is_active ? (
+        <span className="badge badge-inactive">Inactive</span>
+      ) : (
+        <span className={`status-badge status-${row.original.status}`}>{row.original.status}</span>
+      ),
+    }),
+    contractColumnHelper.accessor('effective_date', {
+      header: 'Effective Date',
+      cell: ({ getValue }) => new Date(getValue()).toLocaleDateString(),
+    }),
+    contractColumnHelper.accessor('expiration_date', {
+      header: 'Expiration Date',
+      cell: ({ getValue }) => new Date(getValue()).toLocaleDateString(),
+    }),
+    contractColumnHelper.display({
+      id: 'premium_amount',
+      header: 'Premium Amount',
+      cell: ({ row }) => row.original.premium_amount
+        ? `${row.original.currency} ${row.original.premium_amount.toLocaleString()}`
+        : 'N/A',
+    }),
+    contractColumnHelper.accessor('review_status', {
+      header: 'Review Status',
+      cell: ({ getValue }) => <span className={`status-badge review-${getValue()}`}>{getValue()}</span>,
+    }),
+  ], []);
+
+  const contractsTable = useReactTable({
+    data: filteredContracts,
+    columns: contractColumns,
+    getCoreRowModel: getCoreRowModel(),
   });
 
   return (
@@ -92,61 +147,26 @@ export const ContractsPage: React.FC = () => {
         <div className="contracts-table">
           <table>
             <thead>
-              <tr>
-                <th>Contract Number</th>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Sub-Type</th>
-                <th>Status</th>
-                <th>Effective Date</th>
-                <th>Expiration Date</th>
-                <th>Premium Amount</th>
-                <th>Review Status</th>
-              </tr>
+              {contractsTable.getHeaderGroups().map((headerGroup) => (
+                <tr key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => (
+                    <th key={header.id}>
+                      {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                    </th>
+                  ))}
+                </tr>
+              ))}
             </thead>
             <tbody>
-              {filteredContracts.map((contract) => (
+              {contractsTable.getRowModel().rows.map((row) => (
                 <tr
-                  key={contract.id}
-                  onClick={() => navigate(`/contracts/${contract.id}`)}
+                  key={row.id}
+                  onClick={() => navigate(`/contracts/${row.original.id}`)}
                   className="clickable"
                 >
-                  <td>{contract.contract_number}</td>
-                  <td>{contract.contract_name}</td>
-                  <td>{contract.contract_type || 'N/A'}</td>
-                  <td>
-                    {contract.contract_sub_type ? (
-                      contract.contract_sub_type
-                        .split('_')
-                        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-                        .join(' ')
-                    ) : 'N/A'}
-                  </td>
-                  <td>
-                    {!contract.is_active ? (
-                      <span className="badge badge-inactive">
-                        Inactive
-                      </span>
-                    ) : (
-                      <span className={`status-badge status-${contract.status}`}>
-                        {contract.status}
-                      </span>
-                    )}
-                  </td>
-                  <td>{new Date(contract.effective_date).toLocaleDateString()}</td>
-                  <td>{new Date(contract.expiration_date).toLocaleDateString()}</td>
-                  <td>
-                    {contract.premium_amount
-                      ? `${contract.currency} ${contract.premium_amount.toLocaleString()}`
-                      : 'N/A'}
-                  </td>
-                  <td>
-                    <span
-                      className={`status-badge review-${contract.review_status}`}
-                    >
-                      {contract.review_status}
-                    </span>
-                  </td>
+                  {row.getVisibleCells().map((cell) => (
+                    <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
+                  ))}
                 </tr>
               ))}
             </tbody>
