@@ -1,0 +1,26 @@
+{
+  "workflow_version": "reink-extraction-v1.0.0",
+  "schema_version": "1",
+  "schema_authority": "backend/app/schemas/workflow.py ContractFacts / PartyFacts",
+  "target_n8n_version": "2.43.4",
+  "target_node_versions": {
+    "webhook": 2.2,
+    "respondToWebhook": 1.5,
+    "httpRequest": 4.5,
+    "wait": 1.1,
+    "code": 2,
+    "if": 2.3
+  },
+  "provider_apis": {
+    "landingai": "REST /v1/ade/parse + /v1/ade/extract, reference-ID metadata/global grounding",
+    "openai": "REST /v1/responses, inline input_file, text.format json_schema, store:false"
+  },
+  "requested_landingai_parse": null,
+  "requested_landingai_extract": null,
+  "requested_openai_model": null,
+  "resolved_provider_models": null,
+  "runtime_import_test": "NOT PERFORMED: live n8n unavailable; Docker daemon unavailable",
+  "live_provider_tests": "NOT PERFORMED: neither provider invoked",
+  "deterministic_validation": "node --test workflows/n8n/tests/*.test.cjs (synthetic fixtures, generated Code source and canonical backend validation)",
+  "live_acceptance": "OPEN: two-provider same-build PDF/DOCX corpus, grounding/field evaluation, callback and duplicate/restart/deletion behavior on pinned n8n"
+}

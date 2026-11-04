@@ -199,7 +199,10 @@ export type ReviewStatus = 'pending' | 'approved' | 'rejected';
 export type PartyType = 'cedant' | 'reinsurer' | 'broker' | 'other';
 
 export interface SystemConfig {
-  agent_offline_mode: boolean;
+  workflow_extraction_enabled: boolean;
+  workflow_retry_available: boolean;
+  guided_intake_enabled: false;
+  automated_review_enabled: false;
 }
 
 export type OrganizationRole = 'admin' | 'member' | 'viewer';

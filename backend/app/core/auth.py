@@ -142,6 +142,8 @@ def get_current_user(
             detail="No organization in token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    if settings.WORKFLOW_CUSTOMER_ORG_ID and user.org_id != settings.WORKFLOW_CUSTOMER_ORG_ID:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Organization not permitted")
     return user
 
 

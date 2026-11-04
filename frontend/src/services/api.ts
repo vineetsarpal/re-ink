@@ -12,9 +12,6 @@ import type {
   ExtractionResult,
   ReviewData,
   ReviewApprovalResponse,
-  GuidedIntakeResponse,
-  AutomatedReviewResponse,
-  AgentChatMessage,
   SystemConfig,
   OrganizationMember,
   OrganizationRole,
@@ -75,14 +72,10 @@ api.interceptors.response.use(
 export const documentApi = {
   /**
    * Upload a document for extraction.
-   * @param apiKey - LandingAI API key supplied by the user (BYOK)
    */
-  upload: async (file: File, apiKey?: string): Promise<DocumentUploadResponse> => {
+  upload: async (file: File): Promise<DocumentUploadResponse> => {
     const formData = new FormData();
     formData.append('file', file);
-    if (apiKey) {
-      formData.append('api_key', apiKey);
-    }
 
     const response = await api.post<DocumentUploadResponse>(
       '/documents/upload',
@@ -133,14 +126,11 @@ export const documentApi = {
     return new Uint8Array(response.data);
   },
 
-  /**
-   * Seed a mock extraction job for local testing (skips LandingAI).
-   */
-  seedMockJob: async (jobId?: string): Promise<DocumentExtractionStatus> => {
-    const payload = jobId ? { job_id: jobId } : undefined;
-    const response = await api.post<DocumentExtractionStatus>('/documents/mock-job', payload);
+  retry: async (jobId: string): Promise<DocumentUploadResponse> => {
+    const response = await api.post<DocumentUploadResponse>(`/documents/${jobId}/retry`);
     return response.data;
   },
+
 };
 
 export type DocumentFileSource =
@@ -207,35 +197,6 @@ export const systemApi = {
    */
   getConfig: async (): Promise<SystemConfig> => {
     const response = await api.get<SystemConfig>('/system/config');
-    return response.data;
-  },
-};
-
-// Agent APIs
-export const agentApi = {
-  runIntake: async (
-    jobId: string,
-    userInput = 'Review the extracted contract data and highlight gaps or risks.',
-    chatHistory: AgentChatMessage[] = [],
-  ): Promise<GuidedIntakeResponse> => {
-    const response = await api.post<GuidedIntakeResponse>('/agents/intake', {
-      job_id: jobId,
-      user_input: userInput,
-      chat_history: chatHistory,
-    });
-    return response.data;
-  },
-
-  runContractReview: async (
-    contractId: number,
-    userInput = 'Summarise compliance posture, highlight risks, and recommend next steps.',
-    chatHistory: AgentChatMessage[] = [],
-  ): Promise<AutomatedReviewResponse> => {
-    const response = await api.post<AutomatedReviewResponse>('/agents/review', {
-      contract_id: contractId,
-      user_input: userInput,
-      chat_history: chatHistory,
-    });
     return response.data;
   },
 };

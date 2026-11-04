@@ -1,46 +1,42 @@
-def test_mock_agent_flow_offline(client):
-    # Seed a mock extraction job
-    job_resp = client.post("/api/documents/mock-job", json={"job_id": "mock-agent-job"})
-    assert job_resp.status_code == 200
-    job_payload = job_resp.json()
-    assert job_payload["status"] == "completed"
-    job_id = job_payload["job_id"]
+"""Disabled agent routes keep permissions, with no provider implementation loaded."""
+import sys
+import pytest
 
-    # Run guided intake agent against the mock job
-    intake_resp = client.post(
-        "/api/agents/intake",
-        json={
-            "job_id": job_id,
-            "user_input": "Is this contract ready for approval?",
-            "chat_history": [],
-        },
-    )
-    assert intake_resp.status_code == 200
-    intake_data = intake_resp.json()
-    assert intake_data["status"] == "ready"
-    assert intake_data["analysis"]["summary"].startswith("Offline analysis")
-    assert intake_data["suggested_review_payload"] is not None
+@pytest.mark.parametrize('path,payload', [
+    ('/api/agents/intake', {'job_id': 'unknown', 'user_input': 'Review', 'chat_history': []}),
+    ('/api/agents/review', {'contract_id': 1, 'chat_history': []}),
+])
+def test_agents_disabled(client, path, payload):
+    response = client.post(path, json=payload)
+    assert response.status_code == 503
+    assert 'disabled' in response.json()['detail'].lower()
+    assert 'app.services.landingai_service' not in sys.modules
+    assert 'app.services.agent_service' not in sys.modules
 
-    review_payload = intake_data["suggested_review_payload"]
+def test_offline_mock_route_removed(client):
+    assert client.post('/api/documents/mock-job', json={}).status_code in {404, 405}
 
-    # Approve the suggested payload to create records in the database
-    approve_resp = client.post("/api/review/approve", json=review_payload)
-    assert approve_resp.status_code == 200
-    approval_data = approve_resp.json()
-    contract_id = approval_data["contract_id"]
-    assert contract_id > 0
+def test_public_capabilities_do_not_expose_integration_settings(client, monkeypatch):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, 'WORKFLOW_UPLOADS_ENABLED', False)
+    response = client.get('/api/system/config')
+    assert response.status_code == 200
+    assert response.json() == {
+        'workflow_extraction_enabled': False, 'workflow_retry_available': False,
+        'guided_intake_enabled': False, 'automated_review_enabled': False,
+    }
 
-    # Run automated review agent offline
-    review_agent_resp = client.post(
-        "/api/agents/review",
-        json={
-            "contract_id": contract_id,
-            "user_input": "Provide an offline compliance summary.",
-            "chat_history": [],
-        },
-    )
-    assert review_agent_resp.status_code == 200
-    review_data = review_agent_resp.json()
-    assert review_data["status"] == "complete"
-    assert review_data["analysis"]["summary"].startswith("Offline review summary")
-    assert isinstance(review_data["analysis"]["recommended_actions"], list)
+def test_capabilities_require_configuration_and_upload_enable(client, monkeypatch):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, 'WORKFLOW_UPLOADS_ENABLED', True)
+    monkeypatch.setattr(settings, 'WORKFLOW_CUSTOMER_ORG_ID', 'org-example')
+    monkeypatch.setattr(settings, 'WORKFLOW_WEBHOOK_URL', 'https://workflow.example/webhook')
+    monkeypatch.setattr(settings, 'WORKFLOW_DISPATCH_TOKEN', 'dispatch-secret')
+    monkeypatch.setattr(settings, 'WORKFLOW_SERVICE_TOKEN', 'service-secret')
+    result = client.get('/api/system/config').json()
+    assert result['workflow_extraction_enabled'] is True
+    assert result['workflow_retry_available'] is True
+    assert result['guided_intake_enabled'] is False
+    assert result['automated_review_enabled'] is False
+    monkeypatch.setattr(settings, 'WORKFLOW_SERVICE_TOKEN', '')
+    assert client.get('/api/system/config').json()['workflow_extraction_enabled'] is False

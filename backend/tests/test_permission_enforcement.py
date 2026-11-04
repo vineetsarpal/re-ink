@@ -62,6 +62,7 @@ def _contract_payload(number: str) -> dict:
     return {
         "contract_number": number,
         "contract_name": "Permission Probe",
+        "currency": "USD",
         "effective_date": "2026-01-01",
         "expiration_date": "2026-12-31",
     }
@@ -124,32 +125,13 @@ def test_party_create_requires_party_write_permission(db_session) -> None:
         _clear_overrides()
 
 
-def test_document_upload_does_not_require_document_upload_permission(db_session) -> None:
-    try:
-        client = _client_as(
-            db_session, role="viewer", permissions=["contract:read", "party:read"]
-        )
-
-        response = client.post(
-            "/api/documents/upload",
-            files={"file": ("contract.pdf", BytesIO(b"%PDF-1.4"), "application/pdf")},
-        )
-
-        # A viewer can start an upload despite not having the temporary-bypassed
-        # WorkOS permission.
-        assert response.status_code == 200
-    finally:
-        _clear_overrides()
-
-
-def test_mock_extraction_flow_does_not_require_document_upload_permission(db_session) -> None:
+def test_document_upload_requires_document_upload_permission(db_session) -> None:
     try:
         client = _client_as(db_session, role="viewer", permissions=VIEWER_PERMISSIONS)
-        job_id = "viewer-mock-job"
-
-        assert client.post("/api/documents/mock-job", json={"job_id": job_id}).status_code == 200
-        assert client.get(f"/api/documents/status/{job_id}").status_code == 200
-        assert client.get(f"/api/documents/results/{job_id}").status_code == 200
+        response = client.post("/api/documents/upload",
+                               files={"file": ("contract.pdf", BytesIO(b"%PDF-1.4"), "application/pdf")})
+        assert response.status_code == 403
+        assert client.post("/api/documents/mock-job", json={"job_id": "viewer-mock-job"}).status_code == 405
     finally:
         _clear_overrides()
 
@@ -247,9 +229,9 @@ def test_role_permission_sets_match_resource_behavior(db_session) -> None:
         assert viewer.get("/api/parties/").status_code == 200
         assert viewer.get("/api/parties/search/by-name?name=cedant").status_code == 200
         mock_job_id = "viewer-job"
-        assert viewer.post("/api/documents/mock-job", json={"job_id": mock_job_id}).status_code == 200
-        assert viewer.get(f"/api/documents/status/{mock_job_id}").status_code == 200
-        assert viewer.get(f"/api/documents/results/{mock_job_id}").status_code == 200
+        assert viewer.post("/api/documents/mock-job", json={"job_id": mock_job_id}).status_code == 405
+        assert viewer.get(f"/api/documents/status/{mock_job_id}").status_code == 403
+        assert viewer.get(f"/api/documents/results/{mock_job_id}").status_code == 403
         assert viewer.post("/api/review/approve", json=_review_payload("VIEWER-DENY")).status_code == 403
 
         member = _client_as(db_session, role="member", permissions=MEMBER_PERMISSIONS)
@@ -258,7 +240,7 @@ def test_role_permission_sets_match_resource_behavior(db_session) -> None:
         contract = member.post("/api/contracts/", json=_contract_payload("MEMBER-ALLOW"))
         assert contract.status_code == 201, contract.text
         job = member.post("/api/documents/mock-job", json={"job_id": "member-job"})
-        assert job.status_code == 200, job.text
+        assert job.status_code == 405, job.text
         approval = member.post("/api/review/approve", json=_review_payload("MEMBER-APPROVE"))
         assert approval.status_code == 200, approval.text
         assert member.delete(f"/api/contracts/{contract.json()['id']}").status_code == 403
@@ -298,5 +280,38 @@ def test_contract_delete_allows_any_role_with_contract_delete_permission(
 
         assert allowed.status_code == 200
         assert allowed.json() == {"message": "Contract deleted successfully"}
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.parametrize("missing", ["currency", "contract_number", "effective_date", "expiration_date", "contract_name"])
+def test_review_requires_explicit_mandatory_values(db_session, missing):
+    try:
+        client = _client_as(db_session, role="member", permissions=MEMBER_PERMISSIONS)
+        payload = _review_payload("EXPLICIT")
+        payload["contract"].pop(missing)
+        assert client.post("/api/review/approve", json=payload).status_code == 422
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.parametrize("role", [None, "", "unknown"])
+def test_review_requires_explicit_canonical_role(db_session, role):
+    try:
+        client = _client_as(db_session, role="member", permissions=MEMBER_PERMISSIONS)
+        payload = _review_payload("ROLE")
+        payload["parties"][0]["role"] = role
+        assert client.post("/api/review/approve", json=payload).status_code == 422
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.parametrize("parties", [None, 7, "invalid", {}])
+def test_malformed_review_party_collection_is_validation_error(db_session, parties):
+    try:
+        client = _client_as(db_session, role="member", permissions=MEMBER_PERMISSIONS)
+        payload = _review_payload("BAD-PARTIES")
+        payload["parties"] = parties
+        assert client.post("/api/review/approve", json=payload).status_code == 422
     finally:
         _clear_overrides()

@@ -1,6 +1,6 @@
 """
 Main FastAPI application for re-ink.
-Automated Reinsurance Contracts & Parties creation using Agentic Document Extraction.
+Reinsurance contract extraction through customer-managed workflows.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,7 +27,7 @@ app = FastAPI(
     ## Features
 
     * **Document Upload**: Upload PDF and DOCX contract documents
-    * **AI Extraction**: Automatic extraction of contract terms and parties using LandingAI
+    * **Workflow Extraction**: Customer-managed extraction of contract terms and parties
     * **Review Workflow**: Review and approve extracted data before creating records
     * **Contract Management**: Full CRUD operations for contracts
     * **Party Management**: Full CRUD operations for parties

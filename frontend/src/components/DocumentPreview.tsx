@@ -2,7 +2,7 @@
  * DocumentPreview renders the original uploaded PDF and draws bounding boxes
  * around the passages that grounded each extracted field. Unlike an <iframe>
  * PDF embed, rendering each page to a <canvas> via pdf.js lets us overlay boxes
- * at the normalized coordinates LandingAI returns (left/top/right/bottom in
+ * at validated normalized source coordinates (left/top/right/bottom in
  * 0..1 of the page), so reviewers can *see* exactly where a value came from.
  *
  * Boxes are positioned as percentages of the rendered page, which keeps them

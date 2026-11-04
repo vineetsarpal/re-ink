@@ -1,0 +1,14 @@
+{$N8N_HOSTNAME} {
+    # Production workflow authentication is independently checked by n8n.
+    # Test webhooks and editor/owner setup stay behind this bootstrap barrier.
+    @production_webhook path /webhook/reink-extraction-v1
+    handle @production_webhook {
+        reverse_proxy n8n:5678
+    }
+    handle {
+        basic_auth {
+            {$N8N_ADMIN_USER} {$N8N_ADMIN_PASSWORD_HASH}
+        }
+        reverse_proxy n8n:5678
+    }
+}

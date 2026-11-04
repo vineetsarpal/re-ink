@@ -14,22 +14,20 @@ re-ink is a full-stack web application that streamlines reinsurance contract man
 ## Features
 
 - 📄 **Document Upload**: Upload PDF and DOCX reinsurance contract documents
-- 🤖 **AI Extraction**: Automatic extraction of contract terms and parties using LandingAI
+- 🤖 **AI Extraction**: Automatic extraction of contract terms and parties through a separately hosted n8n workflow
 - ✅ **Review Workflow**: Review and edit AI-extracted data before creating records
-- 🔎 **Source-Grounded Review**: Every extracted field links back to the passage and page it came from, so reviewers can verify AI output at a glance
+- 🔎 **Source-Grounded Review**: Available citations link fields to real passages; fields without evidence require manual checking. PDF supports page highlights; DOCX uses original download
 - 🔐 **WorkOS Authentication**: AuthKit sign-in, org-scoped API access, and automatic organization provisioning for new users
 - 📊 **Contract Management**: Full CRUD operations for reinsurance contracts
 - 👥 **Party Management**: Manage parties (cedants, reinsurers, brokers)
 - 🔁 **Party Deduplication**: Fuzzy-match extracted party names to existing records before approval
 - 🔍 **Search & Filter**: Find contracts and parties quickly
 - 📈 **Dashboard**: Overview of contracts and parties with statistics
-- 🧪 **Sample Extraction Mode**: Seed mock data to test the workflow without LandingAI
-- 🤝 **AI Agent Guidance**: LangChain/LangGraph agents surface intake insights and automated reviews
 
 
 ## Sample Documents
 
-Two sample PDFs are bundled with the frontend and available directly in the Upload page UI — just click a sample card to load it, no setup required.
+Use the synthetic evaluation corpus and expected manifest in `scripts/` and `docs/integration/`. Upload originals through the configured workflow. Deterministic fixtures are not live extraction evidence.
 
 
 ## Technology Stack
@@ -38,10 +36,8 @@ Two sample PDFs are bundled with the frontend and available directly in the Uplo
 - **FastAPI**: Modern Python web framework
 - **SQLAlchemy**: ORM for database operations
 - **PostgreSQL**: Relational database
-- **LandingAI**: Agentic document extraction API
 - **WorkOS**: Authentication, organizations, and account widgets
 - **Alembic**: Database migrations
-- **LangChain/LangGraph**: Guided intake and automated contract review agents
 
 ### Frontend
 - **React 18**: UI framework
@@ -57,48 +53,9 @@ Two sample PDFs are bundled with the frontend and available directly in the Uplo
 
 ## Architecture
 
-```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                              USER / BROWSER                                │
-└───────────────────────────────┬────────────────────────────────────────────┘
-                                │  WorkOS AuthKit session
-                    ┌───────────▼───────────┐
-                    │     React Frontend    │
-                    │  - Upload & Review UI │
-                    │  - AI Insight Panels  │
-                    └───────────┬───────────┘
-                                │  HTTP/REST
-                    ┌───────────▼───────────┐
-                    │     FastAPI Backend   │
-                    │                       │
-                    │ /api/documents        │
-                    │ /api/review           │
-                    │ /api/agents           │
-                    │ /api/widgets          │
-                    └───┬──────────────┬────┘
-                        │              │
-                ┌───────▼───┐      ┌───▼───────────────┐
-                │ Document  │      │ Agent Service     │
-                │ Service   │      │ (LangChain/Graph) │
-                │ (LandingAI│      │ - Guided Intake   │
-                │  workflow)│      │ - Contract Review │
-                └────┬──────┘      └────┬──────────────┘
-                     │                  │
-        ┌────────────▼────────┐         │
-        │ LandingAI ADE API   │         │
-        │ Parse & Extract     │         │
-        └────────────┬────────┘         │
-                     │                  │
-        ┌────────────▼────────────────┐ │            ┌─────────────────┐
-        │ PostgreSQL                  │◄┼────────────┤ LangChain LLM   │
-        │ - Contracts & Parties       │ │  prompts   │  (OpenAI, Ollama│
-        │ - Extraction Jobs           │ │            │   or offline)   │
-        │ - Tenant-scoped data        │ │            │                 │
-        └─────────────────────────────┘ │            └─────────────────┘
-                                        │
-                            (insights returned to frontend)
+The browser uploads to FastAPI, which stores the original privately and commits a workflow job, attempt, and outbox intent. A separate dispatcher calls n8n. The workflow claims its attempt, retrieves the original with a scoped service credential, calls its configured provider, and posts a validated normalized result. PostgreSQL persists lifecycle state; human review and permission-gated approval remain in re-ink.
 
-```
+This is a simulated customer environment with synthetic documents. The app/database and n8n/dispatcher are separately hosted; external providers receive document content. It is not a private or production-certified customer deployment. Guided intake and automated review are disabled.
 
 ## Quick Start
 
@@ -127,7 +84,7 @@ Use `make backend-dev` or `make frontend-dev` to run either side individually, a
 - Node.js 18+
 - PostgreSQL 12+
 - WorkOS AuthKit application/client ID
-- LandingAI API key, either in `backend/.env` or supplied in the Upload UI
+- Private R2 original storage, configured n8n workflow/dispatcher, separate scoped service credentials (see [storage/access](docs/integration/storage-access.md))
 
 ### Backend Setup
 
@@ -199,7 +156,6 @@ re-ink/
 ├── backend/                  # FastAPI backend
 │   ├── app/
 │   │   ├── api/             # API endpoints
-│   │   ├── agents/          # LangChain/LangGraph agent implementations
 │   │   ├── core/            # Configuration (reads VERSION file)
 │   │   ├── db/              # Database setup
 │   │   ├── models/          # SQLAlchemy models (Contract, Party, ExtractionJob)
@@ -227,7 +183,7 @@ re-ink/
 
 1. **Sign in**: User authenticates through WorkOS AuthKit; API requests are scoped to the active organization
 2. **Upload**: User uploads a reinsurance contract document (PDF or DOCX), or selects a bundled sample
-3. **Extract**: System sends document to LandingAI for AI-powered extraction, unless sample extraction mode is used
+3. **Extract**: A durable workflow attempt dispatches to n8n; provider configuration and credentials live in n8n. No provider fallback runs inside re-ink.
 4. **Process**: AI extracts contract details, dates, financial terms, party information, and source evidence
 5. **Review**: User reviews and edits extracted data, verifies grounded fields against the source PDF, and links likely duplicate parties
 6. **Approve**: User approves the data, creating Contract and Party records
@@ -235,15 +191,15 @@ re-ink/
 
 ## API Endpoints
 
-All `/api/*` resource endpoints require a WorkOS Bearer token, except `/api/onboarding/provision-organization`, which accepts an authenticated user before they have an organization so it can provision one. Public health endpoints are available at `/` and `/health`.
+Browser resource endpoints require a WorkOS Bearer token; machine workflow endpoints use separate scoped service authentication (see the integration contract). `/api/system/config` exposes public booleans. The `/api/onboarding/provision-organization` endpoint accepts an authenticated user before they have an organization so it can provision one. Public health endpoints are available at `/` and `/health`.
 
 ### Documents
-- `POST /api/documents/upload` - Upload a document and start extraction in the background
-- `GET /api/documents/status/{job_id}` - Check extraction status (supports `processing`, `completed`, `failed`)
+- `POST /api/documents/upload` - Persist an original and queue a durable workflow attempt
+- `GET /api/documents/status/{job_id}` - Check extraction status (`queued`, `processing`, `completed`, `failed`, `timed_out`)
 - `GET /api/documents/results/{job_id}` - Retrieve parsed extraction results when a job is complete
-- `GET /api/documents/file/{job_id}` - Stream the original uploaded document for the review preview panel (404 for mock jobs)
+- `GET /api/documents/file/{job_id}` - Stream the original uploaded document for the review preview panel
+- `POST /api/documents/{job_id}/retry` - Permission-gated retry for eligible failed/timed-out workflow jobs
 - `DELETE /api/documents/{job_id}` - Delete a document and its extraction job
-- `POST /api/documents/mock-job` - Seed a mock extraction job for local testing without LandingAI
 
 ### Contracts
 - `GET /api/contracts/` - List contracts (supports `status`, `contract_type`, `skip`, `limit` filters)
@@ -269,11 +225,11 @@ All `/api/*` resource endpoints require a WorkOS Bearer token, except `/api/onbo
 - `POST /api/review/reject/{job_id}` - Reject extraction
 
 ### Agents
-- `POST /api/agents/intake` - Run the guided intake LangChain agent for an extraction job
-- `POST /api/agents/review` - Generate an automated review for a contract
+- `POST /api/agents/intake` - Disabled (503); existing upload permission remains enforced
+- `POST /api/agents/review` - Disabled (503); existing contract-read permission remains enforced
 
 ### System
-- `GET /api/system/config` - Return agent configuration flags (e.g., offline mode) for the frontend
+- `GET /api/system/config` - Return public workflow extraction/retry and disabled agent capabilities
 
 ### Widgets
 - `POST /api/widgets/user-profile/token` - Mint a WorkOS User Profile widget token for the signed-in user
@@ -296,31 +252,19 @@ All `/api/*` resource endpoints require a WorkOS Bearer token, except `/api/onbo
 DATABASE_URL=postgresql://user:password@localhost:5432/reink_db
 WORKOS_CLIENT_ID=client_...
 WORKOS_API_KEY=sk_...             # Required for account widgets and org provisioning; not needed for access-token validation
-LANDINGAI_API_KEY=your_landingai_api_key   # Optional — users can supply their own key in the UI (BYOK)
-LANDINGAI_PARSE_URL=https://api.va.landing.ai/v1/ade/parse
-LANDINGAI_EXTRACT_URL=https://api.va.landing.ai/v1/ade/extract
-LANDINGAI_PARSE_MODEL=dpt-2-latest
-LANDINGAI_EXTRACT_MODEL=extract-latest
 MAX_UPLOAD_SIZE=52428800
 UPLOAD_DIR=./uploads
 ALLOWED_ORIGINS=["http://localhost:3000","http://localhost:5173"]
 LOG_LEVEL=INFO
-LLM_PROVIDER=openai               # "openai" or "ollama"
-OPENAI_API_KEY=your_openai_key    # Only needed when LLM_PROVIDER=openai
-AGENT_MODEL=gpt-4o
-AGENT_TEMPERATURE=0.1
-AGENT_OFFLINE_MODE=false          # Set true to skip LLM calls entirely
-OLLAMA_BASE_URL=http://localhost:11434  # Only needed when LLM_PROVIDER=ollama
-OLLAMA_MODEL=llama3.1
 ```
 
-- `LANDINGAI_API_KEY` is optional on the server — users can enter their own key directly in the Upload UI (BYOK). If neither is set, the upload will be rejected with a clear error.
 - `WORKOS_CLIENT_ID` drives WorkOS issuer and JWKS validation for protected API routes.
 - `WORKOS_API_KEY` is required for server-side WorkOS calls, including User Profile widget tokens and automatic organization provisioning.
-- `LLM_PROVIDER` selects the agent LLM backend; set `AGENT_OFFLINE_MODE=true` to skip LLM calls entirely.
 - `ALLOWED_ORIGINS` supports JSON array notation (shown above) or a comma-separated list. In production, set this to your deployed frontend URL.
 - The app version is read from the `VERSION` file at the repo root — do not set `APP_VERSION` in `.env`.
 - **CI/CD**: The deploy workflow runs `uv run alembic upgrade head` before deploying. The GitHub Actions secret `DATABASE_URL` must be configured in the repository settings for migrations to run in CI.
+
+Workflow variables and secret placeholders are listed in [backend/.env.example](backend/.env.example). Uploads start disabled. Supply `WORKFLOW_CUSTOMER_ORG_ID`, trusted HTTPS `WORKFLOW_WEBHOOK_URL`, distinct dispatch/service tokens, worker database credentials, and private R2 configuration through the deployment secret manager. Provider credentials belong only in n8n. Follow the [cutover runbook](docs/integration/cutover.md) before enabling uploads; do not commit secrets.
 
 ### Frontend (.env)
 ```env

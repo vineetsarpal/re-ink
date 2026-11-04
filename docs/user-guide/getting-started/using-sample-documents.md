@@ -1,28 +1,11 @@
-# Using Sample Documents
+# Using Synthetic Documents
 
-Sample documents let you try the workflow without uploading your own contract or calling LandingAI.
+Use synthetic files to demonstrate the workflow without exposing customer contracts. The six evaluation originals are in [`backend/tests/corpus`](../../../backend/tests/corpus/README.md), with ordinary PDF, scanned PDF, DOCX, ambiguous fields, multiple parties and unreadable cases.
 
-![Sample document cards on the Upload page](../assets/screenshots/upload-page.png)
+1. Obtain the intended synthetic original from your demo operator.
+2. Go to **Upload**, select the file and choose **Upload & Process**.
+3. Wait for the configured workflow, then review the actual result and correct it against the original.
 
-Use sample documents when you want to demonstrate the workflow without exposing real contract files.
+These files use the real extraction path and can incur provider charges. There is no sample-extraction switch or automatic mock fallback in the application. Deterministic integration/UI fixtures are separately labeled developer checks; they do not demonstrate live provider quality.
 
-## Use a bundled sample
-
-1. Go to **Upload**.
-2. Choose one of the sample document cards.
-3. Review the loaded sample as you would a real contract.
-
-## Use sample extraction mode
-
-1. Go to **Upload**.
-2. Select **Use Sample Extraction**.
-3. re-ink creates a completed mock extraction job.
-4. Continue to the review step.
-
-## When samples are useful
-
-- Training new reviewers.
-- Demonstrating source-grounded review.
-- Testing party matching and approval without changing production extraction settings.
-
-Sample data should not be treated as a real contract record unless your team intentionally approves it into your environment.
+Missing evidence is expected for the minimal OpenAI implementation. Verify fields against the original and disclose this difference when presenting the demo. Approve synthetic records only when you intentionally want them in the demo environment.

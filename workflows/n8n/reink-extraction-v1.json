@@ -1,0 +1,954 @@
+{
+  "name": "re-ink extraction v1 (bind credentials before activation)",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "reink-extraction-v1",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "extraction-webhook",
+      "name": "Extraction webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "reink-extraction-v1"
+    },
+    {
+      "parameters": {
+        "jsCode": "'use strict';\n// Pure, dependency-free helpers embedded into generated n8n Code nodes.\nfunction fail(code = 'NORMALIZATION_FAILED') { const e = new Error(code); e.code = code; throw e; }\nfunction object(x) { return x !== null && typeof x === 'object' && !Array.isArray(x); }\nfunction checkSchema(value, schema) {\n  if (schema.anyOf) { if (!schema.anyOf.some(s => { try { checkSchema(value,s); return true; } catch { return false; } })) fail(); return; }\n  if (schema.enum && !schema.enum.includes(value)) fail();\n  if (schema.type === 'null') { if (value !== null) fail(); return; }\n  if (schema.type === 'object') {\n    if (!object(value) || Object.keys(value).some(k => !Object.hasOwn(schema.properties,k))) fail();\n    // Nullable facts may be omitted at the canonical boundary, even though model requests require all keys.\n    for (const [k,v] of Object.entries(value)) checkSchema(v,schema.properties[k]);\n  } else if (schema.type === 'array') {\n    if (!Array.isArray(value) || value.length > (schema.maxItems ?? Infinity)) fail();\n    value.forEach(v => checkSchema(v,schema.items));\n  } else if (schema.type === 'number') { if (typeof value !== 'number' || !Number.isFinite(value)) fail(); }\n  else if (schema.type === 'string') { if (typeof value !== 'string' || value.length > (schema.maxLength ?? Infinity)) fail(); }\n}\nfunction business(raw, schema) {\n  if (!object(raw) || !object(raw.contract_data) || !Array.isArray(raw.parties_data)) fail();\n  const pending=[raw];\n  while(pending.length) { const value=pending.pop(); if(typeof value==='number' && !Number.isFinite(value)) fail(); if(value && typeof value==='object')pending.push(...Object.values(value)); }\n  const result = JSON.parse(JSON.stringify(raw));\n  const aliases = { 'quota share':'quota_share', 'quota-share':'quota_share', 'excess of loss':'xol', 'non proportional':'non-proportional', 'non_proportional':'non-proportional', 'facultative obligatory':'facultative_obligatory', 'facultative optional':'facultative_optional', 'cedent':'cedant' };\n  for (const facts of [result.contract_data,...result.parties_data]) {\n    for (const key of ['contract_type','contract_sub_type','contract_nature','role']) {\n      if (typeof facts[key] === 'string') { const label = facts[key].trim().toLowerCase(); facts[key] = aliases[label] ?? label; }\n    }\n  }\n  checkSchema(result,schema);\n  for (const k of ['effective_date','expiration_date','inception_date']) {\n    const v = result.contract_data[k];\n    if (v != null && (!/^\\d{4}-\\d{2}-\\d{2}$/.test(v) || !Number.isFinite(Date.parse(v)) || new Date(v).toISOString().slice(0,10) !== v)) fail();\n  }\n  for (const p of result.parties_data) if (typeof p.name !== 'string' || !p.name.trim() || /[\\x00-\\x1f\\x7f]/.test(p.name)) fail();\n  if (!result.parties_data.length && !Object.values(result.contract_data).some(v => v != null && (typeof v !== 'string' || v.trim()))) fail('NO_CONTRACT_DATA');\n  return result;\n}\nfunction usableHttp(response) { if (response?.statusCode !== 200 || !object(response.body)) fail('PROVIDER_UNAVAILABLE'); return response.body; }\nfunction safeVersion(v) { return typeof v === 'string' && v.length <= 256 && /^[A-Za-z0-9._:/-]+$/.test(v) ? v : undefined; }\nfunction metadata(config, provider, resolved) {\n  const m = {workflow_version:config.workflowVersion,provider,api_version:provider === 'openai' ? 'responses-v1' : 'ade-v1',model:provider === 'openai' ? config.openaiModel : config.landingExtractModel};\n  const version = safeVersion(resolved); if (version) m.model_version=version;\n  return m;\n}\nfunction normalizeOpenAI(response, config, schema) {\n  const body = usableHttp(response);\n  if (body.status !== 'completed' || body.error || body.incomplete_details) fail('PROVIDER_INCOMPLETE');\n  const content = (body.output ?? []).filter(o => o.type === 'message').flatMap(o => o.content ?? []);\n  if (content.some(c => c.type === 'refusal')) fail('PROVIDER_REFUSAL');\n  const text = content.filter(c => c.type === 'output_text').map(c => c.text);\n  if (text.length !== 1 || typeof text[0] !== 'string') fail();\n  let raw; try { raw=JSON.parse(text[0]); } catch { fail(); }\n  const result=business(raw,schema);\n  result.extraction_metadata={...metadata(config,'openai',body.model),warnings:['Source evidence unavailable; verify facts against the original.']};\n  return result;\n}\nfunction parseLanding(response, config) {\n  const body = usableHttp(response), m=body.metadata ?? {};\n  if (!body.markdown?.trim() || !Array.isArray(body.chunks) || !object(body.grounding) || (m.failed_pages?.length ?? 0) || (m.warnings?.length ?? 0) || (m.page_count ?? 0) > 100) fail('UNREADABLE_DOCUMENT');\n  if (m.version && m.version !== config.landingParseModel) fail('PROVIDER_VERSION_MISMATCH');\n  return body;\n}\nfunction plainText(html) {\n  return html.replace(/<[^>]*>/g,' ').replace(/^[ \\t]{0,3}#{1,6}[ \\t]+/gm,'').replace(/&(#x[0-9a-f]+|#\\d+|amp|lt|gt|quot|apos|nbsp);/gi, (s,v) => {\n    const named={amp:'&',lt:'<',gt:'>',quot:'\"',apos:\"'\",nbsp:' '};\n    if (named[v]) return named[v];\n    const code=v.startsWith('#x') ? parseInt(v.slice(2),16) : parseInt(v.slice(1),10);\n    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : s;\n  }).replace(/\\s+/g,' ').trim();\n}\nfunction referenceSource(parse, id, mime) {\n  if (typeof id !== 'string' || !id.trim() || id.length > 128 || /[\\x00-\\x1f\\x7f]/.test(id)) return undefined;\n  const location=parse.grounding[id]; if (!location) return undefined;\n  const chunk=parse.chunks.find(c => c.id === id);\n  if (chunk?.type === 'figure' || /Figure|Logo|ScanCode/.test(location.type ?? '')) return undefined;\n  let quote;\n  if (chunk) quote=plainText(chunk.markdown ?? '');\n  else {\n    // Only actual element content; never use the extracted value as a quote.\n    const escaped=id.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&');\n    const match=(parse.markdown ?? '').match(new RegExp('<([a-z][\\\\w:-]*)\\\\b[^>]*\\\\bid=[\"\\\\\\']'+escaped+'[\"\\\\\\'][^>]*>([\\\\s\\\\S]*?)<\\\\/\\\\1>','i'));\n    if (match && match[1].toLowerCase() !== 'a') quote=plainText(match[2]);\n    const parent=parse.chunks.find(c => c.id === location.position?.chunk_id);\n    if (parent?.type === 'figure') return undefined;\n  }\n  if (!quote || quote.length > 8000) return undefined;\n  const source={source_text:quote,chunk_id:id};\n  if (mime === 'application/pdf') {\n    if (!Number.isInteger(location.page) || location.page < 0) fail();\n    source.page_number=location.page+1;\n    if (location.box != null) {\n      const b=location.box;\n      if (!object(b) || Object.keys(b).sort().join() !== 'bottom,left,right,top' || !Object.values(b).every(v => typeof v === 'number' && Number.isFinite(v) && v>=0 && v<=1) || b.left>=b.right || b.top>=b.bottom) fail();\n      source.bbox={...b};\n    }\n  }\n  return source;\n}\nfunction normalizeLanding(response, parse, mime, config, schema) {\n  const body=usableHttp(response), m=body.metadata ?? {};\n  if (m.schema_violation_error || (m.warnings?.length ?? 0)) fail();\n  if (m.fallback_model_version || (m.version && m.version !== config.landingExtractModel)) fail('PROVIDER_VERSION_MISMATCH');\n  const result=business(body.extraction,schema), meta=body.extraction_metadata ?? {};\n  const refs=(facts,fields) => {\n    if (!object(fields)) return {};\n    const sources={};\n    for (const [key,field] of Object.entries(fields)) {\n      if (!object(field) || !Array.isArray(field.references) || !field.references.length) continue;\n      if (!Object.hasOwn(facts,key) || facts[key] == null) fail();\n      for (const id of field.references) { const s=referenceSource(parse,id,mime); if(s) { sources[key]=s; break; } }\n    }\n    return sources;\n  };\n  if (meta.parties_data != null && (!Array.isArray(meta.parties_data) || meta.parties_data.length !== result.parties_data.length)) fail();\n  result.field_sources={contract:refs(result.contract_data,meta.contract_data), parties:result.parties_data.map((p,i) => refs(p,meta.parties_data?.[i]))};\n  result.extraction_metadata=metadata(config,'landingai',m.version);\n  result.extraction_metadata.provider_version=safeVersion(parse.metadata?.version) ?? config.landingParseModel;\n  return result;\n}\nfunction validateDispatch(body) {\n  return object(body) && Object.keys(body).sort().join() === 'attempt_id,job_id,operation,schema_version' && body.schema_version === '1' && body.operation === 'extract_reinsurance_contract' && ['job_id','attempt_id'].every(k => typeof body[k] === 'string' && body[k].trim() && body[k].length <= 128 && !/[\\x00-\\x1f\\x7f]/.test(body[k]));\n}\nfunction claimDecision(response, dispatch, now=Date.now()) {\n  const b=response?.body;\n  if(response?.statusCode !== 200 || !object(b) || b.schema_version !== '1' || b.job_id !== dispatch.job_id || b.attempt_id !== dispatch.attempt_id || !['run','already_claimed'].includes(b.decision) || !Number.isFinite(Date.parse(b.deadline_at)) || Date.parse(b.deadline_at) <= now) return {run:false};\n  return {run:b.decision === 'run',deadline_at:b.deadline_at};\n}\nfunction callbackDecision(response, frozen, count, now=Date.now(), random=Math.random()) {\n  const code=response?.statusCode, b=response?.body;\n  if (code === 200 && object(b) && Object.keys(b).sort().join() === 'event_id,schema_version,status' && b.schema_version === '1' && b.status === 'acknowledged' && b.event_id === frozen.event.event_id) return {retry:false,reason:'acknowledged'};\n  const transient=!code || code === 429 || code >= 500 || (code>=200 && code<300);\n  if (!transient) return {retry:false,reason:'rejected'};\n  const remaining=(Date.parse(frozen.deadline_at)-now)/1000;\n  if (!(remaining > 0)) return {retry:false,reason:'deadline'};\n  let delay=Math.min(60,5*2**Math.min(count,4))*(0.8+0.2*random);\n  const headers=response?.headers ?? {};\n  const retryAfter=headers['retry-after'] ?? headers['Retry-After'];\n  if (retryAfter != null) {\n    const seconds=/^\\d+(\\.\\d+)?$/.test(String(retryAfter)) ? Number(retryAfter) : (Date.parse(retryAfter)-now)/1000;\n    if (Number.isFinite(seconds)) delay=Math.max(delay,Math.min(60,Math.max(0,seconds)));\n  }\n  if (remaining <= delay) return {retry:false,reason:'deadline'};\n  return {retry:true,delaySeconds:Math.ceil(delay),retry_count:count+1};\n}\n\n\nconst config={\"workflowVersion\":\"reink-extraction-v1.0.0\",\"backendOrigin\":\"https://reink.example.invalid\",\"provider\":\"landingai\",\"landingParseModel\":\"SET_COMPATIBLE_PARSE_MODEL\",\"landingExtractModel\":\"SET_COMPATIBLE_EXTRACT_MODEL\",\"openaiModel\":\"SET_COMPATIBLE_MODEL\",\"prompt\":\"Extract only facts explicitly stated in this reinsurance contract. Unknown fields must be null. Do not infer numbers, currency, dates, names, or roles. Use canonical schema category labels. Dates use YYYY-MM-DD. Commission rates use percentage points. Preserve ambiguous financial wording in description fields and leave uncertain numeric values null. Return parties in document order. Do not return citations, confidence, or extra fields.\"};\nconst body=$input.first().json.body;\nconst valid=validateDispatch(body);\nconst origin=new RegExp('^https://([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::[0-9]{1,5})?$','i').exec(config.backendOrigin);\nconst selectedModels=config.provider==='landingai' ? [config.landingParseModel,config.landingExtractModel] : [config.openaiModel];\nconst configured=!!origin && !origin[1].toLowerCase().endsWith('.invalid') && ['landingai','openai'].includes(config.provider) && selectedModels.every(model=>typeof model==='string' && model.trim() && !model.startsWith('SET_'));\nreturn [{json:{valid,configured,dispatch: valid ? body : null,config,schema:{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"contract_data\":{\"additionalProperties\":false,\"properties\":{\"contract_number\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]},\"contract_name\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]},\"contract_type\":{\"anyOf\":[{\"enum\":[\"treaty\",\"facultative\",\"proportional\",\"non-proportional\"],\"type\":\"string\"},{\"type\":\"null\"}]},\"contract_sub_type\":{\"anyOf\":[{\"enum\":[\"quota_share\",\"surplus\",\"xol\",\"facultative_obligatory\",\"facultative_optional\"],\"type\":\"string\"},{\"type\":\"null\"}]},\"contract_nature\":{\"anyOf\":[{\"enum\":[\"proportional\",\"non-proportional\"],\"type\":\"string\"},{\"type\":\"null\"}]},\"effective_date\":{\"anyOf\":[{\"type\":\"string\",\"description\":\"Real calendar date in YYYY-MM-DD, otherwise null.\"},{\"type\":\"null\"}]},\"expiration_date\":{\"anyOf\":[{\"type\":\"string\",\"description\":\"Real calendar date in YYYY-MM-DD, otherwise null.\"},{\"type\":\"null\"}]},\"inception_date\":{\"anyOf\":[{\"type\":\"string\",\"description\":\"Real calendar date in YYYY-MM-DD, otherwise null.\"},{\"type\":\"null\"}]},\"premium_description\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]},\"premium_amount\":{\"anyOf\":[{\"type\":\"number\"},{\"type\":\"null\"}]},\"currency\":{\"anyOf\":[{\"type\":\"string\",\"enum\":[\"AED\",\"AFN\",\"ALL\",\"AMD\",\"ANG\",\"AOA\",\"ARS\",\"AUD\",\"AWG\",\"AZN\",\"BAM\",\"BBD\",\"BDT\",\"BGN\",\"BHD\",\"BIF\",\"BMD\",\"BND\",\"BOB\",\"BOV\",\"BRL\",\"BSD\",\"BTN\",\"BWP\",\"BYN\",\"BZD\",\"CAD\",\"CDF\",\"CHE\",\"CHF\",\"CHW\",\"CLF\",\"CLP\",\"CNY\",\"COP\",\"COU\",\"CRC\",\"CUC\",\"CUP\",\"CVE\",\"CZK\",\"DJF\",\"DKK\",\"DOP\",\"DZD\",\"EGP\",\"ERN\",\"ETB\",\"EUR\",\"FJD\",\"FKP\",\"GBP\",\"GEL\",\"GHS\",\"GIP\",\"GMD\",\"GNF\",\"GTQ\",\"GYD\",\"HKD\",\"HNL\",\"HTG\",\"HUF\",\"IDR\",\"ILS\",\"INR\",\"IQD\",\"IRR\",\"ISK\",\"JMD\",\"JOD\",\"JPY\",\"KES\",\"KGS\",\"KHR\",\"KMF\",\"KPW\",\"KRW\",\"KWD\",\"KYD\",\"KZT\",\"LAK\",\"LBP\",\"LKR\",\"LRD\",\"LSL\",\"LYD\",\"MAD\",\"MDL\",\"MGA\",\"MKD\",\"MMK\",\"MNT\",\"MOP\",\"MRU\",\"MUR\",\"MVR\",\"MWK\",\"MXN\",\"MXV\",\"MYR\",\"MZN\",\"NAD\",\"NGN\",\"NIO\",\"NOK\",\"NPR\",\"NZD\",\"OMR\",\"PAB\",\"PEN\",\"PGK\",\"PHP\",\"PKR\",\"PLN\",\"PYG\",\"QAR\",\"RON\",\"RSD\",\"RUB\",\"RWF\",\"SAR\",\"SBD\",\"SCR\",\"SDG\",\"SEK\",\"SGD\",\"SHP\",\"SLE\",\"SLL\",\"SOS\",\"SRD\",\"SSP\",\"STN\",\"SVC\",\"SYP\",\"SZL\",\"THB\",\"TJS\",\"TMT\",\"TND\",\"TOP\",\"TRY\",\"TTD\",\"TWD\",\"TZS\",\"UAH\",\"UGX\",\"USD\",\"USN\",\"UYI\",\"UYU\",\"UYW\",\"UZS\",\"VED\",\"VES\",\"VND\",\"VUV\",\"WST\",\"XAF\",\"XAG\",\"XAU\",\"XBA\",\"XBB\",\"XBC\",\"XBD\",\"XCD\",\"XCG\",\"XDR\",\"XOF\",\"XPD\",\"XPF\",\"XPT\",\"XSU\",\"XTS\",\"XUA\",\"XXX\",\"YER\",\"ZAR\",\"ZMW\",\"ZWG\",\"ZWL\"]},{\"type\":\"null\"}]},\"limit_description\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]},\"limit_amount\":{\"anyOf\":[{\"type\":\"number\"},{\"type\":\"null\"}]},\"retention_description\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]},\"retention_amount\":{\"anyOf\":[{\"type\":\"number\"},{\"type\":\"null\"}]},\"commission_description\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]},\"commission_rate\":{\"anyOf\":[{\"type\":\"number\"},{\"type\":\"null\"}]},\"line_of_business\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]},\"coverage_territory\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]},\"coverage_description\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]},\"terms_and_conditions\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]},\"special_provisions\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]}},\"type\":\"object\",\"required\":[\"contract_number\",\"contract_name\",\"contract_type\",\"contract_sub_type\",\"contract_nature\",\"effective_date\",\"expiration_date\",\"inception_date\",\"premium_description\",\"premium_amount\",\"currency\",\"limit_description\",\"limit_amount\",\"retention_description\",\"retention_amount\",\"commission_description\",\"commission_rate\",\"line_of_business\",\"coverage_territory\",\"coverage_description\",\"terms_and_conditions\",\"special_provisions\"]},\"parties_data\":{\"type\":\"array\",\"maxItems\":100,\"items\":{\"additionalProperties\":false,\"properties\":{\"name\":{\"maxLength\":100000,\"type\":\"string\"},\"role\":{\"anyOf\":[{\"enum\":[\"cedant\",\"reinsurer\",\"broker\"],\"type\":\"string\"},{\"type\":\"null\"}]},\"email\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]},\"phone\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]},\"address_line1\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]},\"address_line2\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]},\"city\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]},\"state\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]},\"postal_code\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]},\"country\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]},\"registration_number\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]},\"license_number\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]},\"notes\":{\"anyOf\":[{\"maxLength\":100000,\"type\":\"string\"},{\"type\":\"null\"}]}},\"required\":[\"name\",\"role\",\"email\",\"phone\",\"address_line1\",\"address_line2\",\"city\",\"state\",\"postal_code\",\"country\",\"registration_number\",\"license_number\",\"notes\"],\"type\":\"object\"}}},\"required\":[\"contract_data\",\"parties_data\"]},execution_key:'n8n-'+String($execution.id),response_code:valid ? (configured ? 202 : 503) : 422}}];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "entry",
+      "name": "Entry",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Dispatch permitted",
+              "leftValue": "={{ $json.valid && $json.configured }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "dispatch-permitted",
+      "name": "Dispatch permitted",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {error: $json.valid ? \"Workflow configuration unavailable\" : \"Invalid dispatch\"} }}",
+        "options": {
+          "responseCode": "={{ $json.response_code }}"
+        }
+      },
+      "id": "reject-dispatch",
+      "name": "Reject dispatch",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        780,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {schema_version:\"1\",job_id:$json.dispatch.job_id,attempt_id:$json.dispatch.attempt_id,status:\"accepted\",workflow_execution_id:null} }}",
+        "options": {
+          "responseCode": 202
+        }
+      },
+      "id": "accept-dispatch",
+      "name": "Accept dispatch",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1040,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "POST",
+        "url": "={{ $('Entry').first().json.config.backendOrigin + '/api/workflows/extraction/jobs/' + encodeURIComponent($('Entry').first().json.dispatch.job_id) + '/attempts/' + encodeURIComponent($('Entry').first().json.dispatch.attempt_id) + '/claim' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {schema_version:'1',execution_key:$('Entry').first().json.execution_key} }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "claim-attempt",
+      "name": "Claim attempt",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1300,
+        0
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "'use strict';\n// Pure, dependency-free helpers embedded into generated n8n Code nodes.\nfunction fail(code = 'NORMALIZATION_FAILED') { const e = new Error(code); e.code = code; throw e; }\nfunction object(x) { return x !== null && typeof x === 'object' && !Array.isArray(x); }\nfunction checkSchema(value, schema) {\n  if (schema.anyOf) { if (!schema.anyOf.some(s => { try { checkSchema(value,s); return true; } catch { return false; } })) fail(); return; }\n  if (schema.enum && !schema.enum.includes(value)) fail();\n  if (schema.type === 'null') { if (value !== null) fail(); return; }\n  if (schema.type === 'object') {\n    if (!object(value) || Object.keys(value).some(k => !Object.hasOwn(schema.properties,k))) fail();\n    // Nullable facts may be omitted at the canonical boundary, even though model requests require all keys.\n    for (const [k,v] of Object.entries(value)) checkSchema(v,schema.properties[k]);\n  } else if (schema.type === 'array') {\n    if (!Array.isArray(value) || value.length > (schema.maxItems ?? Infinity)) fail();\n    value.forEach(v => checkSchema(v,schema.items));\n  } else if (schema.type === 'number') { if (typeof value !== 'number' || !Number.isFinite(value)) fail(); }\n  else if (schema.type === 'string') { if (typeof value !== 'string' || value.length > (schema.maxLength ?? Infinity)) fail(); }\n}\nfunction business(raw, schema) {\n  if (!object(raw) || !object(raw.contract_data) || !Array.isArray(raw.parties_data)) fail();\n  const pending=[raw];\n  while(pending.length) { const value=pending.pop(); if(typeof value==='number' && !Number.isFinite(value)) fail(); if(value && typeof value==='object')pending.push(...Object.values(value)); }\n  const result = JSON.parse(JSON.stringify(raw));\n  const aliases = { 'quota share':'quota_share', 'quota-share':'quota_share', 'excess of loss':'xol', 'non proportional':'non-proportional', 'non_proportional':'non-proportional', 'facultative obligatory':'facultative_obligatory', 'facultative optional':'facultative_optional', 'cedent':'cedant' };\n  for (const facts of [result.contract_data,...result.parties_data]) {\n    for (const key of ['contract_type','contract_sub_type','contract_nature','role']) {\n      if (typeof facts[key] === 'string') { const label = facts[key].trim().toLowerCase(); facts[key] = aliases[label] ?? label; }\n    }\n  }\n  checkSchema(result,schema);\n  for (const k of ['effective_date','expiration_date','inception_date']) {\n    const v = result.contract_data[k];\n    if (v != null && (!/^\\d{4}-\\d{2}-\\d{2}$/.test(v) || !Number.isFinite(Date.parse(v)) || new Date(v).toISOString().slice(0,10) !== v)) fail();\n  }\n  for (const p of result.parties_data) if (typeof p.name !== 'string' || !p.name.trim() || /[\\x00-\\x1f\\x7f]/.test(p.name)) fail();\n  if (!result.parties_data.length && !Object.values(result.contract_data).some(v => v != null && (typeof v !== 'string' || v.trim()))) fail('NO_CONTRACT_DATA');\n  return result;\n}\nfunction usableHttp(response) { if (response?.statusCode !== 200 || !object(response.body)) fail('PROVIDER_UNAVAILABLE'); return response.body; }\nfunction safeVersion(v) { return typeof v === 'string' && v.length <= 256 && /^[A-Za-z0-9._:/-]+$/.test(v) ? v : undefined; }\nfunction metadata(config, provider, resolved) {\n  const m = {workflow_version:config.workflowVersion,provider,api_version:provider === 'openai' ? 'responses-v1' : 'ade-v1',model:provider === 'openai' ? config.openaiModel : config.landingExtractModel};\n  const version = safeVersion(resolved); if (version) m.model_version=version;\n  return m;\n}\nfunction normalizeOpenAI(response, config, schema) {\n  const body = usableHttp(response);\n  if (body.status !== 'completed' || body.error || body.incomplete_details) fail('PROVIDER_INCOMPLETE');\n  const content = (body.output ?? []).filter(o => o.type === 'message').flatMap(o => o.content ?? []);\n  if (content.some(c => c.type === 'refusal')) fail('PROVIDER_REFUSAL');\n  const text = content.filter(c => c.type === 'output_text').map(c => c.text);\n  if (text.length !== 1 || typeof text[0] !== 'string') fail();\n  let raw; try { raw=JSON.parse(text[0]); } catch { fail(); }\n  const result=business(raw,schema);\n  result.extraction_metadata={...metadata(config,'openai',body.model),warnings:['Source evidence unavailable; verify facts against the original.']};\n  return result;\n}\nfunction parseLanding(response, config) {\n  const body = usableHttp(response), m=body.metadata ?? {};\n  if (!body.markdown?.trim() || !Array.isArray(body.chunks) || !object(body.grounding) || (m.failed_pages?.length ?? 0) || (m.warnings?.length ?? 0) || (m.page_count ?? 0) > 100) fail('UNREADABLE_DOCUMENT');\n  if (m.version && m.version !== config.landingParseModel) fail('PROVIDER_VERSION_MISMATCH');\n  return body;\n}\nfunction plainText(html) {\n  return html.replace(/<[^>]*>/g,' ').replace(/^[ \\t]{0,3}#{1,6}[ \\t]+/gm,'').replace(/&(#x[0-9a-f]+|#\\d+|amp|lt|gt|quot|apos|nbsp);/gi, (s,v) => {\n    const named={amp:'&',lt:'<',gt:'>',quot:'\"',apos:\"'\",nbsp:' '};\n    if (named[v]) return named[v];\n    const code=v.startsWith('#x') ? parseInt(v.slice(2),16) : parseInt(v.slice(1),10);\n    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : s;\n  }).replace(/\\s+/g,' ').trim();\n}\nfunction referenceSource(parse, id, mime) {\n  if (typeof id !== 'string' || !id.trim() || id.length > 128 || /[\\x00-\\x1f\\x7f]/.test(id)) return undefined;\n  const location=parse.grounding[id]; if (!location) return undefined;\n  const chunk=parse.chunks.find(c => c.id === id);\n  if (chunk?.type === 'figure' || /Figure|Logo|ScanCode/.test(location.type ?? '')) return undefined;\n  let quote;\n  if (chunk) quote=plainText(chunk.markdown ?? '');\n  else {\n    // Only actual element content; never use the extracted value as a quote.\n    const escaped=id.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&');\n    const match=(parse.markdown ?? '').match(new RegExp('<([a-z][\\\\w:-]*)\\\\b[^>]*\\\\bid=[\"\\\\\\']'+escaped+'[\"\\\\\\'][^>]*>([\\\\s\\\\S]*?)<\\\\/\\\\1>','i'));\n    if (match && match[1].toLowerCase() !== 'a') quote=plainText(match[2]);\n    const parent=parse.chunks.find(c => c.id === location.position?.chunk_id);\n    if (parent?.type === 'figure') return undefined;\n  }\n  if (!quote || quote.length > 8000) return undefined;\n  const source={source_text:quote,chunk_id:id};\n  if (mime === 'application/pdf') {\n    if (!Number.isInteger(location.page) || location.page < 0) fail();\n    source.page_number=location.page+1;\n    if (location.box != null) {\n      const b=location.box;\n      if (!object(b) || Object.keys(b).sort().join() !== 'bottom,left,right,top' || !Object.values(b).every(v => typeof v === 'number' && Number.isFinite(v) && v>=0 && v<=1) || b.left>=b.right || b.top>=b.bottom) fail();\n      source.bbox={...b};\n    }\n  }\n  return source;\n}\nfunction normalizeLanding(response, parse, mime, config, schema) {\n  const body=usableHttp(response), m=body.metadata ?? {};\n  if (m.schema_violation_error || (m.warnings?.length ?? 0)) fail();\n  if (m.fallback_model_version || (m.version && m.version !== config.landingExtractModel)) fail('PROVIDER_VERSION_MISMATCH');\n  const result=business(body.extraction,schema), meta=body.extraction_metadata ?? {};\n  const refs=(facts,fields) => {\n    if (!object(fields)) return {};\n    const sources={};\n    for (const [key,field] of Object.entries(fields)) {\n      if (!object(field) || !Array.isArray(field.references) || !field.references.length) continue;\n      if (!Object.hasOwn(facts,key) || facts[key] == null) fail();\n      for (const id of field.references) { const s=referenceSource(parse,id,mime); if(s) { sources[key]=s; break; } }\n    }\n    return sources;\n  };\n  if (meta.parties_data != null && (!Array.isArray(meta.parties_data) || meta.parties_data.length !== result.parties_data.length)) fail();\n  result.field_sources={contract:refs(result.contract_data,meta.contract_data), parties:result.parties_data.map((p,i) => refs(p,meta.parties_data?.[i]))};\n  result.extraction_metadata=metadata(config,'landingai',m.version);\n  result.extraction_metadata.provider_version=safeVersion(parse.metadata?.version) ?? config.landingParseModel;\n  return result;\n}\nfunction validateDispatch(body) {\n  return object(body) && Object.keys(body).sort().join() === 'attempt_id,job_id,operation,schema_version' && body.schema_version === '1' && body.operation === 'extract_reinsurance_contract' && ['job_id','attempt_id'].every(k => typeof body[k] === 'string' && body[k].trim() && body[k].length <= 128 && !/[\\x00-\\x1f\\x7f]/.test(body[k]));\n}\nfunction claimDecision(response, dispatch, now=Date.now()) {\n  const b=response?.body;\n  if(response?.statusCode !== 200 || !object(b) || b.schema_version !== '1' || b.job_id !== dispatch.job_id || b.attempt_id !== dispatch.attempt_id || !['run','already_claimed'].includes(b.decision) || !Number.isFinite(Date.parse(b.deadline_at)) || Date.parse(b.deadline_at) <= now) return {run:false};\n  return {run:b.decision === 'run',deadline_at:b.deadline_at};\n}\nfunction callbackDecision(response, frozen, count, now=Date.now(), random=Math.random()) {\n  const code=response?.statusCode, b=response?.body;\n  if (code === 200 && object(b) && Object.keys(b).sort().join() === 'event_id,schema_version,status' && b.schema_version === '1' && b.status === 'acknowledged' && b.event_id === frozen.event.event_id) return {retry:false,reason:'acknowledged'};\n  const transient=!code || code === 429 || code >= 500 || (code>=200 && code<300);\n  if (!transient) return {retry:false,reason:'rejected'};\n  const remaining=(Date.parse(frozen.deadline_at)-now)/1000;\n  if (!(remaining > 0)) return {retry:false,reason:'deadline'};\n  let delay=Math.min(60,5*2**Math.min(count,4))*(0.8+0.2*random);\n  const headers=response?.headers ?? {};\n  const retryAfter=headers['retry-after'] ?? headers['Retry-After'];\n  if (retryAfter != null) {\n    const seconds=/^\\d+(\\.\\d+)?$/.test(String(retryAfter)) ? Number(retryAfter) : (Date.parse(retryAfter)-now)/1000;\n    if (Number.isFinite(seconds)) delay=Math.max(delay,Math.min(60,Math.max(0,seconds)));\n  }\n  if (remaining <= delay) return {retry:false,reason:'deadline'};\n  return {retry:true,delaySeconds:Math.ceil(delay),retry_count:count+1};\n}\n\n\nreturn [{json:claimDecision($input.first().json,$('Entry').first().json.dispatch)}];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "claim-gate",
+      "name": "Claim gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Owned active attempt",
+              "leftValue": "={{ $json.run }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "owned-active-attempt",
+      "name": "Owned active attempt",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        260,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "GET",
+        "url": "={{ $('Entry').first().json.config.backendOrigin + '/api/workflows/extraction/jobs/' + encodeURIComponent($('Entry').first().json.dispatch.job_id) + '/document?attempt_id=' + encodeURIComponent($('Entry').first().json.dispatch.attempt_id) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "file",
+              "outputPropertyName": "document"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "timeout": "={{ Math.max(1,Math.min(300000,Date.parse($('Claim gate').first().json.deadline_at)-Date.now())) }}"
+        }
+      },
+      "id": "fetch-original",
+      "name": "Fetch original",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        520,
+        220
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "'use strict';\n// Pure, dependency-free helpers embedded into generated n8n Code nodes.\nfunction fail(code = 'NORMALIZATION_FAILED') { const e = new Error(code); e.code = code; throw e; }\nfunction object(x) { return x !== null && typeof x === 'object' && !Array.isArray(x); }\nfunction checkSchema(value, schema) {\n  if (schema.anyOf) { if (!schema.anyOf.some(s => { try { checkSchema(value,s); return true; } catch { return false; } })) fail(); return; }\n  if (schema.enum && !schema.enum.includes(value)) fail();\n  if (schema.type === 'null') { if (value !== null) fail(); return; }\n  if (schema.type === 'object') {\n    if (!object(value) || Object.keys(value).some(k => !Object.hasOwn(schema.properties,k))) fail();\n    // Nullable facts may be omitted at the canonical boundary, even though model requests require all keys.\n    for (const [k,v] of Object.entries(value)) checkSchema(v,schema.properties[k]);\n  } else if (schema.type === 'array') {\n    if (!Array.isArray(value) || value.length > (schema.maxItems ?? Infinity)) fail();\n    value.forEach(v => checkSchema(v,schema.items));\n  } else if (schema.type === 'number') { if (typeof value !== 'number' || !Number.isFinite(value)) fail(); }\n  else if (schema.type === 'string') { if (typeof value !== 'string' || value.length > (schema.maxLength ?? Infinity)) fail(); }\n}\nfunction business(raw, schema) {\n  if (!object(raw) || !object(raw.contract_data) || !Array.isArray(raw.parties_data)) fail();\n  const pending=[raw];\n  while(pending.length) { const value=pending.pop(); if(typeof value==='number' && !Number.isFinite(value)) fail(); if(value && typeof value==='object')pending.push(...Object.values(value)); }\n  const result = JSON.parse(JSON.stringify(raw));\n  const aliases = { 'quota share':'quota_share', 'quota-share':'quota_share', 'excess of loss':'xol', 'non proportional':'non-proportional', 'non_proportional':'non-proportional', 'facultative obligatory':'facultative_obligatory', 'facultative optional':'facultative_optional', 'cedent':'cedant' };\n  for (const facts of [result.contract_data,...result.parties_data]) {\n    for (const key of ['contract_type','contract_sub_type','contract_nature','role']) {\n      if (typeof facts[key] === 'string') { const label = facts[key].trim().toLowerCase(); facts[key] = aliases[label] ?? label; }\n    }\n  }\n  checkSchema(result,schema);\n  for (const k of ['effective_date','expiration_date','inception_date']) {\n    const v = result.contract_data[k];\n    if (v != null && (!/^\\d{4}-\\d{2}-\\d{2}$/.test(v) || !Number.isFinite(Date.parse(v)) || new Date(v).toISOString().slice(0,10) !== v)) fail();\n  }\n  for (const p of result.parties_data) if (typeof p.name !== 'string' || !p.name.trim() || /[\\x00-\\x1f\\x7f]/.test(p.name)) fail();\n  if (!result.parties_data.length && !Object.values(result.contract_data).some(v => v != null && (typeof v !== 'string' || v.trim()))) fail('NO_CONTRACT_DATA');\n  return result;\n}\nfunction usableHttp(response) { if (response?.statusCode !== 200 || !object(response.body)) fail('PROVIDER_UNAVAILABLE'); return response.body; }\nfunction safeVersion(v) { return typeof v === 'string' && v.length <= 256 && /^[A-Za-z0-9._:/-]+$/.test(v) ? v : undefined; }\nfunction metadata(config, provider, resolved) {\n  const m = {workflow_version:config.workflowVersion,provider,api_version:provider === 'openai' ? 'responses-v1' : 'ade-v1',model:provider === 'openai' ? config.openaiModel : config.landingExtractModel};\n  const version = safeVersion(resolved); if (version) m.model_version=version;\n  return m;\n}\nfunction normalizeOpenAI(response, config, schema) {\n  const body = usableHttp(response);\n  if (body.status !== 'completed' || body.error || body.incomplete_details) fail('PROVIDER_INCOMPLETE');\n  const content = (body.output ?? []).filter(o => o.type === 'message').flatMap(o => o.content ?? []);\n  if (content.some(c => c.type === 'refusal')) fail('PROVIDER_REFUSAL');\n  const text = content.filter(c => c.type === 'output_text').map(c => c.text);\n  if (text.length !== 1 || typeof text[0] !== 'string') fail();\n  let raw; try { raw=JSON.parse(text[0]); } catch { fail(); }\n  const result=business(raw,schema);\n  result.extraction_metadata={...metadata(config,'openai',body.model),warnings:['Source evidence unavailable; verify facts against the original.']};\n  return result;\n}\nfunction parseLanding(response, config) {\n  const body = usableHttp(response), m=body.metadata ?? {};\n  if (!body.markdown?.trim() || !Array.isArray(body.chunks) || !object(body.grounding) || (m.failed_pages?.length ?? 0) || (m.warnings?.length ?? 0) || (m.page_count ?? 0) > 100) fail('UNREADABLE_DOCUMENT');\n  if (m.version && m.version !== config.landingParseModel) fail('PROVIDER_VERSION_MISMATCH');\n  return body;\n}\nfunction plainText(html) {\n  return html.replace(/<[^>]*>/g,' ').replace(/^[ \\t]{0,3}#{1,6}[ \\t]+/gm,'').replace(/&(#x[0-9a-f]+|#\\d+|amp|lt|gt|quot|apos|nbsp);/gi, (s,v) => {\n    const named={amp:'&',lt:'<',gt:'>',quot:'\"',apos:\"'\",nbsp:' '};\n    if (named[v]) return named[v];\n    const code=v.startsWith('#x') ? parseInt(v.slice(2),16) : parseInt(v.slice(1),10);\n    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : s;\n  }).replace(/\\s+/g,' ').trim();\n}\nfunction referenceSource(parse, id, mime) {\n  if (typeof id !== 'string' || !id.trim() || id.length > 128 || /[\\x00-\\x1f\\x7f]/.test(id)) return undefined;\n  const location=parse.grounding[id]; if (!location) return undefined;\n  const chunk=parse.chunks.find(c => c.id === id);\n  if (chunk?.type === 'figure' || /Figure|Logo|ScanCode/.test(location.type ?? '')) return undefined;\n  let quote;\n  if (chunk) quote=plainText(chunk.markdown ?? '');\n  else {\n    // Only actual element content; never use the extracted value as a quote.\n    const escaped=id.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&');\n    const match=(parse.markdown ?? '').match(new RegExp('<([a-z][\\\\w:-]*)\\\\b[^>]*\\\\bid=[\"\\\\\\']'+escaped+'[\"\\\\\\'][^>]*>([\\\\s\\\\S]*?)<\\\\/\\\\1>','i'));\n    if (match && match[1].toLowerCase() !== 'a') quote=plainText(match[2]);\n    const parent=parse.chunks.find(c => c.id === location.position?.chunk_id);\n    if (parent?.type === 'figure') return undefined;\n  }\n  if (!quote || quote.length > 8000) return undefined;\n  const source={source_text:quote,chunk_id:id};\n  if (mime === 'application/pdf') {\n    if (!Number.isInteger(location.page) || location.page < 0) fail();\n    source.page_number=location.page+1;\n    if (location.box != null) {\n      const b=location.box;\n      if (!object(b) || Object.keys(b).sort().join() !== 'bottom,left,right,top' || !Object.values(b).every(v => typeof v === 'number' && Number.isFinite(v) && v>=0 && v<=1) || b.left>=b.right || b.top>=b.bottom) fail();\n      source.bbox={...b};\n    }\n  }\n  return source;\n}\nfunction normalizeLanding(response, parse, mime, config, schema) {\n  const body=usableHttp(response), m=body.metadata ?? {};\n  if (m.schema_violation_error || (m.warnings?.length ?? 0)) fail();\n  if (m.fallback_model_version || (m.version && m.version !== config.landingExtractModel)) fail('PROVIDER_VERSION_MISMATCH');\n  const result=business(body.extraction,schema), meta=body.extraction_metadata ?? {};\n  const refs=(facts,fields) => {\n    if (!object(fields)) return {};\n    const sources={};\n    for (const [key,field] of Object.entries(fields)) {\n      if (!object(field) || !Array.isArray(field.references) || !field.references.length) continue;\n      if (!Object.hasOwn(facts,key) || facts[key] == null) fail();\n      for (const id of field.references) { const s=referenceSource(parse,id,mime); if(s) { sources[key]=s; break; } }\n    }\n    return sources;\n  };\n  if (meta.parties_data != null && (!Array.isArray(meta.parties_data) || meta.parties_data.length !== result.parties_data.length)) fail();\n  result.field_sources={contract:refs(result.contract_data,meta.contract_data), parties:result.parties_data.map((p,i) => refs(p,meta.parties_data?.[i]))};\n  result.extraction_metadata=metadata(config,'landingai',m.version);\n  result.extraction_metadata.provider_version=safeVersion(parse.metadata?.version) ?? config.landingParseModel;\n  return result;\n}\nfunction validateDispatch(body) {\n  return object(body) && Object.keys(body).sort().join() === 'attempt_id,job_id,operation,schema_version' && body.schema_version === '1' && body.operation === 'extract_reinsurance_contract' && ['job_id','attempt_id'].every(k => typeof body[k] === 'string' && body[k].trim() && body[k].length <= 128 && !/[\\x00-\\x1f\\x7f]/.test(body[k]));\n}\nfunction claimDecision(response, dispatch, now=Date.now()) {\n  const b=response?.body;\n  if(response?.statusCode !== 200 || !object(b) || b.schema_version !== '1' || b.job_id !== dispatch.job_id || b.attempt_id !== dispatch.attempt_id || !['run','already_claimed'].includes(b.decision) || !Number.isFinite(Date.parse(b.deadline_at)) || Date.parse(b.deadline_at) <= now) return {run:false};\n  return {run:b.decision === 'run',deadline_at:b.deadline_at};\n}\nfunction callbackDecision(response, frozen, count, now=Date.now(), random=Math.random()) {\n  const code=response?.statusCode, b=response?.body;\n  if (code === 200 && object(b) && Object.keys(b).sort().join() === 'event_id,schema_version,status' && b.schema_version === '1' && b.status === 'acknowledged' && b.event_id === frozen.event.event_id) return {retry:false,reason:'acknowledged'};\n  const transient=!code || code === 429 || code >= 500 || (code>=200 && code<300);\n  if (!transient) return {retry:false,reason:'rejected'};\n  const remaining=(Date.parse(frozen.deadline_at)-now)/1000;\n  if (!(remaining > 0)) return {retry:false,reason:'deadline'};\n  let delay=Math.min(60,5*2**Math.min(count,4))*(0.8+0.2*random);\n  const headers=response?.headers ?? {};\n  const retryAfter=headers['retry-after'] ?? headers['Retry-After'];\n  if (retryAfter != null) {\n    const seconds=/^\\d+(\\.\\d+)?$/.test(String(retryAfter)) ? Number(retryAfter) : (Date.parse(retryAfter)-now)/1000;\n    if (Number.isFinite(seconds)) delay=Math.max(delay,Math.min(60,Math.max(0,seconds)));\n  }\n  if (remaining <= delay) return {retry:false,reason:'deadline'};\n  return {retry:true,delaySeconds:Math.ceil(delay),retry_count:count+1};\n}\n\n\nconst input=$input.first(), ctx=$('Entry').first().json;\ntry {\n  if(Date.now()>=Date.parse($('Claim gate').first().json.deadline_at)) return [];\n  if(input.json.error || (input.json.statusCode && input.json.statusCode!==200) || !input.binary?.document) fail('DOCUMENT_UNAVAILABLE');\n  const doc=input.binary.document, mime=doc.mimeType?.split(';')[0];\n  if(!['application/pdf','application/vnd.openxmlformats-officedocument.wordprocessingml.document'].includes(mime)) fail('UNSUPPORTED_INPUT');\n  const bytes=await this.helpers.getBinaryDataBuffer(0,'document');\n  if(bytes.length>50*1024*1024) fail('INPUT_LIMIT');\n  if(ctx.config.provider==='openai' && bytes.length>=50000000) fail('INPUT_LIMIT');\n  const filename=mime==='application/pdf' ? 'original.pdf' : 'original.docx';\n  const request=ctx.config.provider==='openai' ? {model:ctx.config.openaiModel,store:false,input:[{role:'user',content:[{type:'input_file',filename,file_data:'data:'+mime+';base64,'+bytes.toString('base64')},{type:'input_text',text:ctx.config.prompt}]}],text:{format:{type:'json_schema',name:'reinsurance_contract',strict:true,schema:ctx.schema}}} : null;\n  return [{json:{ready:true,mime,request,provider:ctx.config.provider},binary:input.binary}];\n} catch(e) {return [{json:{ready:false,failure:e.code ?? 'NORMALIZATION_FAILED'}}];}",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "prepare-document",
+      "name": "Prepare document",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Document ready",
+              "leftValue": "={{ $json.ready }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "document-ready",
+      "name": "Document ready",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1040,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "LandingAI selected",
+              "leftValue": "={{ $json.provider === 'landingai' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "landingai-selected",
+      "name": "LandingAI selected",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1300,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "POST",
+        "url": "https://api.va.landing.ai/v1/ade/parse",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "document",
+              "inputDataFieldName": "document"
+            },
+            {
+              "name": "model",
+              "value": "={{ $('Entry').first().json.config.landingParseModel }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "timeout": "={{ Math.max(1,Math.min(300000,Date.parse($('Claim gate').first().json.deadline_at)-Date.now())) }}"
+        }
+      },
+      "id": "landingai-parse",
+      "name": "LandingAI Parse",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        0,
+        440
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "'use strict';\n// Pure, dependency-free helpers embedded into generated n8n Code nodes.\nfunction fail(code = 'NORMALIZATION_FAILED') { const e = new Error(code); e.code = code; throw e; }\nfunction object(x) { return x !== null && typeof x === 'object' && !Array.isArray(x); }\nfunction checkSchema(value, schema) {\n  if (schema.anyOf) { if (!schema.anyOf.some(s => { try { checkSchema(value,s); return true; } catch { return false; } })) fail(); return; }\n  if (schema.enum && !schema.enum.includes(value)) fail();\n  if (schema.type === 'null') { if (value !== null) fail(); return; }\n  if (schema.type === 'object') {\n    if (!object(value) || Object.keys(value).some(k => !Object.hasOwn(schema.properties,k))) fail();\n    // Nullable facts may be omitted at the canonical boundary, even though model requests require all keys.\n    for (const [k,v] of Object.entries(value)) checkSchema(v,schema.properties[k]);\n  } else if (schema.type === 'array') {\n    if (!Array.isArray(value) || value.length > (schema.maxItems ?? Infinity)) fail();\n    value.forEach(v => checkSchema(v,schema.items));\n  } else if (schema.type === 'number') { if (typeof value !== 'number' || !Number.isFinite(value)) fail(); }\n  else if (schema.type === 'string') { if (typeof value !== 'string' || value.length > (schema.maxLength ?? Infinity)) fail(); }\n}\nfunction business(raw, schema) {\n  if (!object(raw) || !object(raw.contract_data) || !Array.isArray(raw.parties_data)) fail();\n  const pending=[raw];\n  while(pending.length) { const value=pending.pop(); if(typeof value==='number' && !Number.isFinite(value)) fail(); if(value && typeof value==='object')pending.push(...Object.values(value)); }\n  const result = JSON.parse(JSON.stringify(raw));\n  const aliases = { 'quota share':'quota_share', 'quota-share':'quota_share', 'excess of loss':'xol', 'non proportional':'non-proportional', 'non_proportional':'non-proportional', 'facultative obligatory':'facultative_obligatory', 'facultative optional':'facultative_optional', 'cedent':'cedant' };\n  for (const facts of [result.contract_data,...result.parties_data]) {\n    for (const key of ['contract_type','contract_sub_type','contract_nature','role']) {\n      if (typeof facts[key] === 'string') { const label = facts[key].trim().toLowerCase(); facts[key] = aliases[label] ?? label; }\n    }\n  }\n  checkSchema(result,schema);\n  for (const k of ['effective_date','expiration_date','inception_date']) {\n    const v = result.contract_data[k];\n    if (v != null && (!/^\\d{4}-\\d{2}-\\d{2}$/.test(v) || !Number.isFinite(Date.parse(v)) || new Date(v).toISOString().slice(0,10) !== v)) fail();\n  }\n  for (const p of result.parties_data) if (typeof p.name !== 'string' || !p.name.trim() || /[\\x00-\\x1f\\x7f]/.test(p.name)) fail();\n  if (!result.parties_data.length && !Object.values(result.contract_data).some(v => v != null && (typeof v !== 'string' || v.trim()))) fail('NO_CONTRACT_DATA');\n  return result;\n}\nfunction usableHttp(response) { if (response?.statusCode !== 200 || !object(response.body)) fail('PROVIDER_UNAVAILABLE'); return response.body; }\nfunction safeVersion(v) { return typeof v === 'string' && v.length <= 256 && /^[A-Za-z0-9._:/-]+$/.test(v) ? v : undefined; }\nfunction metadata(config, provider, resolved) {\n  const m = {workflow_version:config.workflowVersion,provider,api_version:provider === 'openai' ? 'responses-v1' : 'ade-v1',model:provider === 'openai' ? config.openaiModel : config.landingExtractModel};\n  const version = safeVersion(resolved); if (version) m.model_version=version;\n  return m;\n}\nfunction normalizeOpenAI(response, config, schema) {\n  const body = usableHttp(response);\n  if (body.status !== 'completed' || body.error || body.incomplete_details) fail('PROVIDER_INCOMPLETE');\n  const content = (body.output ?? []).filter(o => o.type === 'message').flatMap(o => o.content ?? []);\n  if (content.some(c => c.type === 'refusal')) fail('PROVIDER_REFUSAL');\n  const text = content.filter(c => c.type === 'output_text').map(c => c.text);\n  if (text.length !== 1 || typeof text[0] !== 'string') fail();\n  let raw; try { raw=JSON.parse(text[0]); } catch { fail(); }\n  const result=business(raw,schema);\n  result.extraction_metadata={...metadata(config,'openai',body.model),warnings:['Source evidence unavailable; verify facts against the original.']};\n  return result;\n}\nfunction parseLanding(response, config) {\n  const body = usableHttp(response), m=body.metadata ?? {};\n  if (!body.markdown?.trim() || !Array.isArray(body.chunks) || !object(body.grounding) || (m.failed_pages?.length ?? 0) || (m.warnings?.length ?? 0) || (m.page_count ?? 0) > 100) fail('UNREADABLE_DOCUMENT');\n  if (m.version && m.version !== config.landingParseModel) fail('PROVIDER_VERSION_MISMATCH');\n  return body;\n}\nfunction plainText(html) {\n  return html.replace(/<[^>]*>/g,' ').replace(/^[ \\t]{0,3}#{1,6}[ \\t]+/gm,'').replace(/&(#x[0-9a-f]+|#\\d+|amp|lt|gt|quot|apos|nbsp);/gi, (s,v) => {\n    const named={amp:'&',lt:'<',gt:'>',quot:'\"',apos:\"'\",nbsp:' '};\n    if (named[v]) return named[v];\n    const code=v.startsWith('#x') ? parseInt(v.slice(2),16) : parseInt(v.slice(1),10);\n    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : s;\n  }).replace(/\\s+/g,' ').trim();\n}\nfunction referenceSource(parse, id, mime) {\n  if (typeof id !== 'string' || !id.trim() || id.length > 128 || /[\\x00-\\x1f\\x7f]/.test(id)) return undefined;\n  const location=parse.grounding[id]; if (!location) return undefined;\n  const chunk=parse.chunks.find(c => c.id === id);\n  if (chunk?.type === 'figure' || /Figure|Logo|ScanCode/.test(location.type ?? '')) return undefined;\n  let quote;\n  if (chunk) quote=plainText(chunk.markdown ?? '');\n  else {\n    // Only actual element content; never use the extracted value as a quote.\n    const escaped=id.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&');\n    const match=(parse.markdown ?? '').match(new RegExp('<([a-z][\\\\w:-]*)\\\\b[^>]*\\\\bid=[\"\\\\\\']'+escaped+'[\"\\\\\\'][^>]*>([\\\\s\\\\S]*?)<\\\\/\\\\1>','i'));\n    if (match && match[1].toLowerCase() !== 'a') quote=plainText(match[2]);\n    const parent=parse.chunks.find(c => c.id === location.position?.chunk_id);\n    if (parent?.type === 'figure') return undefined;\n  }\n  if (!quote || quote.length > 8000) return undefined;\n  const source={source_text:quote,chunk_id:id};\n  if (mime === 'application/pdf') {\n    if (!Number.isInteger(location.page) || location.page < 0) fail();\n    source.page_number=location.page+1;\n    if (location.box != null) {\n      const b=location.box;\n      if (!object(b) || Object.keys(b).sort().join() !== 'bottom,left,right,top' || !Object.values(b).every(v => typeof v === 'number' && Number.isFinite(v) && v>=0 && v<=1) || b.left>=b.right || b.top>=b.bottom) fail();\n      source.bbox={...b};\n    }\n  }\n  return source;\n}\nfunction normalizeLanding(response, parse, mime, config, schema) {\n  const body=usableHttp(response), m=body.metadata ?? {};\n  if (m.schema_violation_error || (m.warnings?.length ?? 0)) fail();\n  if (m.fallback_model_version || (m.version && m.version !== config.landingExtractModel)) fail('PROVIDER_VERSION_MISMATCH');\n  const result=business(body.extraction,schema), meta=body.extraction_metadata ?? {};\n  const refs=(facts,fields) => {\n    if (!object(fields)) return {};\n    const sources={};\n    for (const [key,field] of Object.entries(fields)) {\n      if (!object(field) || !Array.isArray(field.references) || !field.references.length) continue;\n      if (!Object.hasOwn(facts,key) || facts[key] == null) fail();\n      for (const id of field.references) { const s=referenceSource(parse,id,mime); if(s) { sources[key]=s; break; } }\n    }\n    return sources;\n  };\n  if (meta.parties_data != null && (!Array.isArray(meta.parties_data) || meta.parties_data.length !== result.parties_data.length)) fail();\n  result.field_sources={contract:refs(result.contract_data,meta.contract_data), parties:result.parties_data.map((p,i) => refs(p,meta.parties_data?.[i]))};\n  result.extraction_metadata=metadata(config,'landingai',m.version);\n  result.extraction_metadata.provider_version=safeVersion(parse.metadata?.version) ?? config.landingParseModel;\n  return result;\n}\nfunction validateDispatch(body) {\n  return object(body) && Object.keys(body).sort().join() === 'attempt_id,job_id,operation,schema_version' && body.schema_version === '1' && body.operation === 'extract_reinsurance_contract' && ['job_id','attempt_id'].every(k => typeof body[k] === 'string' && body[k].trim() && body[k].length <= 128 && !/[\\x00-\\x1f\\x7f]/.test(body[k]));\n}\nfunction claimDecision(response, dispatch, now=Date.now()) {\n  const b=response?.body;\n  if(response?.statusCode !== 200 || !object(b) || b.schema_version !== '1' || b.job_id !== dispatch.job_id || b.attempt_id !== dispatch.attempt_id || !['run','already_claimed'].includes(b.decision) || !Number.isFinite(Date.parse(b.deadline_at)) || Date.parse(b.deadline_at) <= now) return {run:false};\n  return {run:b.decision === 'run',deadline_at:b.deadline_at};\n}\nfunction callbackDecision(response, frozen, count, now=Date.now(), random=Math.random()) {\n  const code=response?.statusCode, b=response?.body;\n  if (code === 200 && object(b) && Object.keys(b).sort().join() === 'event_id,schema_version,status' && b.schema_version === '1' && b.status === 'acknowledged' && b.event_id === frozen.event.event_id) return {retry:false,reason:'acknowledged'};\n  const transient=!code || code === 429 || code >= 500 || (code>=200 && code<300);\n  if (!transient) return {retry:false,reason:'rejected'};\n  const remaining=(Date.parse(frozen.deadline_at)-now)/1000;\n  if (!(remaining > 0)) return {retry:false,reason:'deadline'};\n  let delay=Math.min(60,5*2**Math.min(count,4))*(0.8+0.2*random);\n  const headers=response?.headers ?? {};\n  const retryAfter=headers['retry-after'] ?? headers['Retry-After'];\n  if (retryAfter != null) {\n    const seconds=/^\\d+(\\.\\d+)?$/.test(String(retryAfter)) ? Number(retryAfter) : (Date.parse(retryAfter)-now)/1000;\n    if (Number.isFinite(seconds)) delay=Math.max(delay,Math.min(60,Math.max(0,seconds)));\n  }\n  if (remaining <= delay) return {retry:false,reason:'deadline'};\n  return {retry:true,delaySeconds:Math.ceil(delay),retry_count:count+1};\n}\n\n\ntry {\n  if(Date.now()>=Date.parse($('Claim gate').first().json.deadline_at)) return [];\n  const parse=parseLanding($input.first().json,$('Entry').first().json.config);\n  const markdown=await this.helpers.prepareBinaryData(Buffer.from(parse.markdown,'utf8'),'parsed.md','text/markdown');\n  return [{json:{ready:true,parse},binary:{markdown}}];\n} catch(e) {return [{json:{ready:false,failure:e.code ?? 'NORMALIZATION_FAILED'}}];}",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "prepare-markdown",
+      "name": "Prepare markdown",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Markdown ready",
+              "leftValue": "={{ $json.ready }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "markdown-ready",
+      "name": "Markdown ready",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        520,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "POST",
+        "url": "https://api.va.landing.ai/v1/ade/extract",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "markdown",
+              "inputDataFieldName": "markdown"
+            },
+            {
+              "name": "schema",
+              "value": "={{ JSON.stringify($('Entry').first().json.schema) }}"
+            },
+            {
+              "name": "model",
+              "value": "={{ $('Entry').first().json.config.landingExtractModel }}"
+            },
+            {
+              "name": "strict",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "timeout": "={{ Math.max(1,Math.min(300000,Date.parse($('Claim gate').first().json.deadline_at)-Date.now())) }}"
+        }
+      },
+      "id": "landingai-extract",
+      "name": "LandingAI Extract",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        780,
+        440
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "'use strict';\n// Pure, dependency-free helpers embedded into generated n8n Code nodes.\nfunction fail(code = 'NORMALIZATION_FAILED') { const e = new Error(code); e.code = code; throw e; }\nfunction object(x) { return x !== null && typeof x === 'object' && !Array.isArray(x); }\nfunction checkSchema(value, schema) {\n  if (schema.anyOf) { if (!schema.anyOf.some(s => { try { checkSchema(value,s); return true; } catch { return false; } })) fail(); return; }\n  if (schema.enum && !schema.enum.includes(value)) fail();\n  if (schema.type === 'null') { if (value !== null) fail(); return; }\n  if (schema.type === 'object') {\n    if (!object(value) || Object.keys(value).some(k => !Object.hasOwn(schema.properties,k))) fail();\n    // Nullable facts may be omitted at the canonical boundary, even though model requests require all keys.\n    for (const [k,v] of Object.entries(value)) checkSchema(v,schema.properties[k]);\n  } else if (schema.type === 'array') {\n    if (!Array.isArray(value) || value.length > (schema.maxItems ?? Infinity)) fail();\n    value.forEach(v => checkSchema(v,schema.items));\n  } else if (schema.type === 'number') { if (typeof value !== 'number' || !Number.isFinite(value)) fail(); }\n  else if (schema.type === 'string') { if (typeof value !== 'string' || value.length > (schema.maxLength ?? Infinity)) fail(); }\n}\nfunction business(raw, schema) {\n  if (!object(raw) || !object(raw.contract_data) || !Array.isArray(raw.parties_data)) fail();\n  const pending=[raw];\n  while(pending.length) { const value=pending.pop(); if(typeof value==='number' && !Number.isFinite(value)) fail(); if(value && typeof value==='object')pending.push(...Object.values(value)); }\n  const result = JSON.parse(JSON.stringify(raw));\n  const aliases = { 'quota share':'quota_share', 'quota-share':'quota_share', 'excess of loss':'xol', 'non proportional':'non-proportional', 'non_proportional':'non-proportional', 'facultative obligatory':'facultative_obligatory', 'facultative optional':'facultative_optional', 'cedent':'cedant' };\n  for (const facts of [result.contract_data,...result.parties_data]) {\n    for (const key of ['contract_type','contract_sub_type','contract_nature','role']) {\n      if (typeof facts[key] === 'string') { const label = facts[key].trim().toLowerCase(); facts[key] = aliases[label] ?? label; }\n    }\n  }\n  checkSchema(result,schema);\n  for (const k of ['effective_date','expiration_date','inception_date']) {\n    const v = result.contract_data[k];\n    if (v != null && (!/^\\d{4}-\\d{2}-\\d{2}$/.test(v) || !Number.isFinite(Date.parse(v)) || new Date(v).toISOString().slice(0,10) !== v)) fail();\n  }\n  for (const p of result.parties_data) if (typeof p.name !== 'string' || !p.name.trim() || /[\\x00-\\x1f\\x7f]/.test(p.name)) fail();\n  if (!result.parties_data.length && !Object.values(result.contract_data).some(v => v != null && (typeof v !== 'string' || v.trim()))) fail('NO_CONTRACT_DATA');\n  return result;\n}\nfunction usableHttp(response) { if (response?.statusCode !== 200 || !object(response.body)) fail('PROVIDER_UNAVAILABLE'); return response.body; }\nfunction safeVersion(v) { return typeof v === 'string' && v.length <= 256 && /^[A-Za-z0-9._:/-]+$/.test(v) ? v : undefined; }\nfunction metadata(config, provider, resolved) {\n  const m = {workflow_version:config.workflowVersion,provider,api_version:provider === 'openai' ? 'responses-v1' : 'ade-v1',model:provider === 'openai' ? config.openaiModel : config.landingExtractModel};\n  const version = safeVersion(resolved); if (version) m.model_version=version;\n  return m;\n}\nfunction normalizeOpenAI(response, config, schema) {\n  const body = usableHttp(response);\n  if (body.status !== 'completed' || body.error || body.incomplete_details) fail('PROVIDER_INCOMPLETE');\n  const content = (body.output ?? []).filter(o => o.type === 'message').flatMap(o => o.content ?? []);\n  if (content.some(c => c.type === 'refusal')) fail('PROVIDER_REFUSAL');\n  const text = content.filter(c => c.type === 'output_text').map(c => c.text);\n  if (text.length !== 1 || typeof text[0] !== 'string') fail();\n  let raw; try { raw=JSON.parse(text[0]); } catch { fail(); }\n  const result=business(raw,schema);\n  result.extraction_metadata={...metadata(config,'openai',body.model),warnings:['Source evidence unavailable; verify facts against the original.']};\n  return result;\n}\nfunction parseLanding(response, config) {\n  const body = usableHttp(response), m=body.metadata ?? {};\n  if (!body.markdown?.trim() || !Array.isArray(body.chunks) || !object(body.grounding) || (m.failed_pages?.length ?? 0) || (m.warnings?.length ?? 0) || (m.page_count ?? 0) > 100) fail('UNREADABLE_DOCUMENT');\n  if (m.version && m.version !== config.landingParseModel) fail('PROVIDER_VERSION_MISMATCH');\n  return body;\n}\nfunction plainText(html) {\n  return html.replace(/<[^>]*>/g,' ').replace(/^[ \\t]{0,3}#{1,6}[ \\t]+/gm,'').replace(/&(#x[0-9a-f]+|#\\d+|amp|lt|gt|quot|apos|nbsp);/gi, (s,v) => {\n    const named={amp:'&',lt:'<',gt:'>',quot:'\"',apos:\"'\",nbsp:' '};\n    if (named[v]) return named[v];\n    const code=v.startsWith('#x') ? parseInt(v.slice(2),16) : parseInt(v.slice(1),10);\n    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : s;\n  }).replace(/\\s+/g,' ').trim();\n}\nfunction referenceSource(parse, id, mime) {\n  if (typeof id !== 'string' || !id.trim() || id.length > 128 || /[\\x00-\\x1f\\x7f]/.test(id)) return undefined;\n  const location=parse.grounding[id]; if (!location) return undefined;\n  const chunk=parse.chunks.find(c => c.id === id);\n  if (chunk?.type === 'figure' || /Figure|Logo|ScanCode/.test(location.type ?? '')) return undefined;\n  let quote;\n  if (chunk) quote=plainText(chunk.markdown ?? '');\n  else {\n    // Only actual element content; never use the extracted value as a quote.\n    const escaped=id.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&');\n    const match=(parse.markdown ?? '').match(new RegExp('<([a-z][\\\\w:-]*)\\\\b[^>]*\\\\bid=[\"\\\\\\']'+escaped+'[\"\\\\\\'][^>]*>([\\\\s\\\\S]*?)<\\\\/\\\\1>','i'));\n    if (match && match[1].toLowerCase() !== 'a') quote=plainText(match[2]);\n    const parent=parse.chunks.find(c => c.id === location.position?.chunk_id);\n    if (parent?.type === 'figure') return undefined;\n  }\n  if (!quote || quote.length > 8000) return undefined;\n  const source={source_text:quote,chunk_id:id};\n  if (mime === 'application/pdf') {\n    if (!Number.isInteger(location.page) || location.page < 0) fail();\n    source.page_number=location.page+1;\n    if (location.box != null) {\n      const b=location.box;\n      if (!object(b) || Object.keys(b).sort().join() !== 'bottom,left,right,top' || !Object.values(b).every(v => typeof v === 'number' && Number.isFinite(v) && v>=0 && v<=1) || b.left>=b.right || b.top>=b.bottom) fail();\n      source.bbox={...b};\n    }\n  }\n  return source;\n}\nfunction normalizeLanding(response, parse, mime, config, schema) {\n  const body=usableHttp(response), m=body.metadata ?? {};\n  if (m.schema_violation_error || (m.warnings?.length ?? 0)) fail();\n  if (m.fallback_model_version || (m.version && m.version !== config.landingExtractModel)) fail('PROVIDER_VERSION_MISMATCH');\n  const result=business(body.extraction,schema), meta=body.extraction_metadata ?? {};\n  const refs=(facts,fields) => {\n    if (!object(fields)) return {};\n    const sources={};\n    for (const [key,field] of Object.entries(fields)) {\n      if (!object(field) || !Array.isArray(field.references) || !field.references.length) continue;\n      if (!Object.hasOwn(facts,key) || facts[key] == null) fail();\n      for (const id of field.references) { const s=referenceSource(parse,id,mime); if(s) { sources[key]=s; break; } }\n    }\n    return sources;\n  };\n  if (meta.parties_data != null && (!Array.isArray(meta.parties_data) || meta.parties_data.length !== result.parties_data.length)) fail();\n  result.field_sources={contract:refs(result.contract_data,meta.contract_data), parties:result.parties_data.map((p,i) => refs(p,meta.parties_data?.[i]))};\n  result.extraction_metadata=metadata(config,'landingai',m.version);\n  result.extraction_metadata.provider_version=safeVersion(parse.metadata?.version) ?? config.landingParseModel;\n  return result;\n}\nfunction validateDispatch(body) {\n  return object(body) && Object.keys(body).sort().join() === 'attempt_id,job_id,operation,schema_version' && body.schema_version === '1' && body.operation === 'extract_reinsurance_contract' && ['job_id','attempt_id'].every(k => typeof body[k] === 'string' && body[k].trim() && body[k].length <= 128 && !/[\\x00-\\x1f\\x7f]/.test(body[k]));\n}\nfunction claimDecision(response, dispatch, now=Date.now()) {\n  const b=response?.body;\n  if(response?.statusCode !== 200 || !object(b) || b.schema_version !== '1' || b.job_id !== dispatch.job_id || b.attempt_id !== dispatch.attempt_id || !['run','already_claimed'].includes(b.decision) || !Number.isFinite(Date.parse(b.deadline_at)) || Date.parse(b.deadline_at) <= now) return {run:false};\n  return {run:b.decision === 'run',deadline_at:b.deadline_at};\n}\nfunction callbackDecision(response, frozen, count, now=Date.now(), random=Math.random()) {\n  const code=response?.statusCode, b=response?.body;\n  if (code === 200 && object(b) && Object.keys(b).sort().join() === 'event_id,schema_version,status' && b.schema_version === '1' && b.status === 'acknowledged' && b.event_id === frozen.event.event_id) return {retry:false,reason:'acknowledged'};\n  const transient=!code || code === 429 || code >= 500 || (code>=200 && code<300);\n  if (!transient) return {retry:false,reason:'rejected'};\n  const remaining=(Date.parse(frozen.deadline_at)-now)/1000;\n  if (!(remaining > 0)) return {retry:false,reason:'deadline'};\n  let delay=Math.min(60,5*2**Math.min(count,4))*(0.8+0.2*random);\n  const headers=response?.headers ?? {};\n  const retryAfter=headers['retry-after'] ?? headers['Retry-After'];\n  if (retryAfter != null) {\n    const seconds=/^\\d+(\\.\\d+)?$/.test(String(retryAfter)) ? Number(retryAfter) : (Date.parse(retryAfter)-now)/1000;\n    if (Number.isFinite(seconds)) delay=Math.max(delay,Math.min(60,Math.max(0,seconds)));\n  }\n  if (remaining <= delay) return {retry:false,reason:'deadline'};\n  return {retry:true,delaySeconds:Math.ceil(delay),retry_count:count+1};\n}\n\n\ntry { const e=$('Entry').first().json; return [{json:{result:normalizeLanding($input.first().json,$('Prepare markdown').first().json.parse,$('Prepare document').first().json.mime,e.config,e.schema)}}]; } catch(e) {return [{json:{failure:e.code ?? 'NORMALIZATION_FAILED'}}];}",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "normalize-landingai",
+      "name": "Normalize LandingAI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.request }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "timeout": "={{ Math.max(1,Math.min(300000,Date.parse($('Claim gate').first().json.deadline_at)-Date.now())) }}"
+        }
+      },
+      "id": "openai-responses",
+      "name": "OpenAI Responses",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1300,
+        440
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "'use strict';\n// Pure, dependency-free helpers embedded into generated n8n Code nodes.\nfunction fail(code = 'NORMALIZATION_FAILED') { const e = new Error(code); e.code = code; throw e; }\nfunction object(x) { return x !== null && typeof x === 'object' && !Array.isArray(x); }\nfunction checkSchema(value, schema) {\n  if (schema.anyOf) { if (!schema.anyOf.some(s => { try { checkSchema(value,s); return true; } catch { return false; } })) fail(); return; }\n  if (schema.enum && !schema.enum.includes(value)) fail();\n  if (schema.type === 'null') { if (value !== null) fail(); return; }\n  if (schema.type === 'object') {\n    if (!object(value) || Object.keys(value).some(k => !Object.hasOwn(schema.properties,k))) fail();\n    // Nullable facts may be omitted at the canonical boundary, even though model requests require all keys.\n    for (const [k,v] of Object.entries(value)) checkSchema(v,schema.properties[k]);\n  } else if (schema.type === 'array') {\n    if (!Array.isArray(value) || value.length > (schema.maxItems ?? Infinity)) fail();\n    value.forEach(v => checkSchema(v,schema.items));\n  } else if (schema.type === 'number') { if (typeof value !== 'number' || !Number.isFinite(value)) fail(); }\n  else if (schema.type === 'string') { if (typeof value !== 'string' || value.length > (schema.maxLength ?? Infinity)) fail(); }\n}\nfunction business(raw, schema) {\n  if (!object(raw) || !object(raw.contract_data) || !Array.isArray(raw.parties_data)) fail();\n  const pending=[raw];\n  while(pending.length) { const value=pending.pop(); if(typeof value==='number' && !Number.isFinite(value)) fail(); if(value && typeof value==='object')pending.push(...Object.values(value)); }\n  const result = JSON.parse(JSON.stringify(raw));\n  const aliases = { 'quota share':'quota_share', 'quota-share':'quota_share', 'excess of loss':'xol', 'non proportional':'non-proportional', 'non_proportional':'non-proportional', 'facultative obligatory':'facultative_obligatory', 'facultative optional':'facultative_optional', 'cedent':'cedant' };\n  for (const facts of [result.contract_data,...result.parties_data]) {\n    for (const key of ['contract_type','contract_sub_type','contract_nature','role']) {\n      if (typeof facts[key] === 'string') { const label = facts[key].trim().toLowerCase(); facts[key] = aliases[label] ?? label; }\n    }\n  }\n  checkSchema(result,schema);\n  for (const k of ['effective_date','expiration_date','inception_date']) {\n    const v = result.contract_data[k];\n    if (v != null && (!/^\\d{4}-\\d{2}-\\d{2}$/.test(v) || !Number.isFinite(Date.parse(v)) || new Date(v).toISOString().slice(0,10) !== v)) fail();\n  }\n  for (const p of result.parties_data) if (typeof p.name !== 'string' || !p.name.trim() || /[\\x00-\\x1f\\x7f]/.test(p.name)) fail();\n  if (!result.parties_data.length && !Object.values(result.contract_data).some(v => v != null && (typeof v !== 'string' || v.trim()))) fail('NO_CONTRACT_DATA');\n  return result;\n}\nfunction usableHttp(response) { if (response?.statusCode !== 200 || !object(response.body)) fail('PROVIDER_UNAVAILABLE'); return response.body; }\nfunction safeVersion(v) { return typeof v === 'string' && v.length <= 256 && /^[A-Za-z0-9._:/-]+$/.test(v) ? v : undefined; }\nfunction metadata(config, provider, resolved) {\n  const m = {workflow_version:config.workflowVersion,provider,api_version:provider === 'openai' ? 'responses-v1' : 'ade-v1',model:provider === 'openai' ? config.openaiModel : config.landingExtractModel};\n  const version = safeVersion(resolved); if (version) m.model_version=version;\n  return m;\n}\nfunction normalizeOpenAI(response, config, schema) {\n  const body = usableHttp(response);\n  if (body.status !== 'completed' || body.error || body.incomplete_details) fail('PROVIDER_INCOMPLETE');\n  const content = (body.output ?? []).filter(o => o.type === 'message').flatMap(o => o.content ?? []);\n  if (content.some(c => c.type === 'refusal')) fail('PROVIDER_REFUSAL');\n  const text = content.filter(c => c.type === 'output_text').map(c => c.text);\n  if (text.length !== 1 || typeof text[0] !== 'string') fail();\n  let raw; try { raw=JSON.parse(text[0]); } catch { fail(); }\n  const result=business(raw,schema);\n  result.extraction_metadata={...metadata(config,'openai',body.model),warnings:['Source evidence unavailable; verify facts against the original.']};\n  return result;\n}\nfunction parseLanding(response, config) {\n  const body = usableHttp(response), m=body.metadata ?? {};\n  if (!body.markdown?.trim() || !Array.isArray(body.chunks) || !object(body.grounding) || (m.failed_pages?.length ?? 0) || (m.warnings?.length ?? 0) || (m.page_count ?? 0) > 100) fail('UNREADABLE_DOCUMENT');\n  if (m.version && m.version !== config.landingParseModel) fail('PROVIDER_VERSION_MISMATCH');\n  return body;\n}\nfunction plainText(html) {\n  return html.replace(/<[^>]*>/g,' ').replace(/^[ \\t]{0,3}#{1,6}[ \\t]+/gm,'').replace(/&(#x[0-9a-f]+|#\\d+|amp|lt|gt|quot|apos|nbsp);/gi, (s,v) => {\n    const named={amp:'&',lt:'<',gt:'>',quot:'\"',apos:\"'\",nbsp:' '};\n    if (named[v]) return named[v];\n    const code=v.startsWith('#x') ? parseInt(v.slice(2),16) : parseInt(v.slice(1),10);\n    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : s;\n  }).replace(/\\s+/g,' ').trim();\n}\nfunction referenceSource(parse, id, mime) {\n  if (typeof id !== 'string' || !id.trim() || id.length > 128 || /[\\x00-\\x1f\\x7f]/.test(id)) return undefined;\n  const location=parse.grounding[id]; if (!location) return undefined;\n  const chunk=parse.chunks.find(c => c.id === id);\n  if (chunk?.type === 'figure' || /Figure|Logo|ScanCode/.test(location.type ?? '')) return undefined;\n  let quote;\n  if (chunk) quote=plainText(chunk.markdown ?? '');\n  else {\n    // Only actual element content; never use the extracted value as a quote.\n    const escaped=id.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&');\n    const match=(parse.markdown ?? '').match(new RegExp('<([a-z][\\\\w:-]*)\\\\b[^>]*\\\\bid=[\"\\\\\\']'+escaped+'[\"\\\\\\'][^>]*>([\\\\s\\\\S]*?)<\\\\/\\\\1>','i'));\n    if (match && match[1].toLowerCase() !== 'a') quote=plainText(match[2]);\n    const parent=parse.chunks.find(c => c.id === location.position?.chunk_id);\n    if (parent?.type === 'figure') return undefined;\n  }\n  if (!quote || quote.length > 8000) return undefined;\n  const source={source_text:quote,chunk_id:id};\n  if (mime === 'application/pdf') {\n    if (!Number.isInteger(location.page) || location.page < 0) fail();\n    source.page_number=location.page+1;\n    if (location.box != null) {\n      const b=location.box;\n      if (!object(b) || Object.keys(b).sort().join() !== 'bottom,left,right,top' || !Object.values(b).every(v => typeof v === 'number' && Number.isFinite(v) && v>=0 && v<=1) || b.left>=b.right || b.top>=b.bottom) fail();\n      source.bbox={...b};\n    }\n  }\n  return source;\n}\nfunction normalizeLanding(response, parse, mime, config, schema) {\n  const body=usableHttp(response), m=body.metadata ?? {};\n  if (m.schema_violation_error || (m.warnings?.length ?? 0)) fail();\n  if (m.fallback_model_version || (m.version && m.version !== config.landingExtractModel)) fail('PROVIDER_VERSION_MISMATCH');\n  const result=business(body.extraction,schema), meta=body.extraction_metadata ?? {};\n  const refs=(facts,fields) => {\n    if (!object(fields)) return {};\n    const sources={};\n    for (const [key,field] of Object.entries(fields)) {\n      if (!object(field) || !Array.isArray(field.references) || !field.references.length) continue;\n      if (!Object.hasOwn(facts,key) || facts[key] == null) fail();\n      for (const id of field.references) { const s=referenceSource(parse,id,mime); if(s) { sources[key]=s; break; } }\n    }\n    return sources;\n  };\n  if (meta.parties_data != null && (!Array.isArray(meta.parties_data) || meta.parties_data.length !== result.parties_data.length)) fail();\n  result.field_sources={contract:refs(result.contract_data,meta.contract_data), parties:result.parties_data.map((p,i) => refs(p,meta.parties_data?.[i]))};\n  result.extraction_metadata=metadata(config,'landingai',m.version);\n  result.extraction_metadata.provider_version=safeVersion(parse.metadata?.version) ?? config.landingParseModel;\n  return result;\n}\nfunction validateDispatch(body) {\n  return object(body) && Object.keys(body).sort().join() === 'attempt_id,job_id,operation,schema_version' && body.schema_version === '1' && body.operation === 'extract_reinsurance_contract' && ['job_id','attempt_id'].every(k => typeof body[k] === 'string' && body[k].trim() && body[k].length <= 128 && !/[\\x00-\\x1f\\x7f]/.test(body[k]));\n}\nfunction claimDecision(response, dispatch, now=Date.now()) {\n  const b=response?.body;\n  if(response?.statusCode !== 200 || !object(b) || b.schema_version !== '1' || b.job_id !== dispatch.job_id || b.attempt_id !== dispatch.attempt_id || !['run','already_claimed'].includes(b.decision) || !Number.isFinite(Date.parse(b.deadline_at)) || Date.parse(b.deadline_at) <= now) return {run:false};\n  return {run:b.decision === 'run',deadline_at:b.deadline_at};\n}\nfunction callbackDecision(response, frozen, count, now=Date.now(), random=Math.random()) {\n  const code=response?.statusCode, b=response?.body;\n  if (code === 200 && object(b) && Object.keys(b).sort().join() === 'event_id,schema_version,status' && b.schema_version === '1' && b.status === 'acknowledged' && b.event_id === frozen.event.event_id) return {retry:false,reason:'acknowledged'};\n  const transient=!code || code === 429 || code >= 500 || (code>=200 && code<300);\n  if (!transient) return {retry:false,reason:'rejected'};\n  const remaining=(Date.parse(frozen.deadline_at)-now)/1000;\n  if (!(remaining > 0)) return {retry:false,reason:'deadline'};\n  let delay=Math.min(60,5*2**Math.min(count,4))*(0.8+0.2*random);\n  const headers=response?.headers ?? {};\n  const retryAfter=headers['retry-after'] ?? headers['Retry-After'];\n  if (retryAfter != null) {\n    const seconds=/^\\d+(\\.\\d+)?$/.test(String(retryAfter)) ? Number(retryAfter) : (Date.parse(retryAfter)-now)/1000;\n    if (Number.isFinite(seconds)) delay=Math.max(delay,Math.min(60,Math.max(0,seconds)));\n  }\n  if (remaining <= delay) return {retry:false,reason:'deadline'};\n  return {retry:true,delaySeconds:Math.ceil(delay),retry_count:count+1};\n}\n\n\ntry {const e=$('Entry').first().json; return [{json:{result:normalizeOpenAI($input.first().json,e.config,e.schema)}}];} catch(e) {return [{json:{failure:e.code ?? 'NORMALIZATION_FAILED'}}];}",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "normalize-openai",
+      "name": "Normalize OpenAI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json,ctx=$('Entry').first().json;\nconst deadline_at=$('Claim gate').first().json.deadline_at;\nif(Date.now()>=Date.parse(deadline_at)) return [];\nconst event={schema_version:'1',...{job_id:ctx.dispatch.job_id,attempt_id:ctx.dispatch.attempt_id},event_id:ctx.execution_key+'-terminal',workflow_execution_id:String($execution.id)};\nconst safe={NO_CONTRACT_DATA:'No useful contract data was found.',UNREADABLE_DOCUMENT:'The document could not be read.',UNSUPPORTED_INPUT:'The document format is unsupported.',INPUT_LIMIT:'The document exceeds the provider input limit.',DOCUMENT_UNAVAILABLE:'The original could not be retrieved.',PROVIDER_UNAVAILABLE:'The extraction provider is unavailable.',PROVIDER_REFUSAL:'The provider declined extraction.',PROVIDER_INCOMPLETE:'The provider did not complete extraction.',PROVIDER_VERSION_MISMATCH:'The provider configuration changed unexpectedly.',NORMALIZATION_FAILED:'The extracted data could not be normalized.',OUTPUT_LIMIT:'The extracted result exceeds the callback limit.'};\nif(input.result){event.status='completed';event.result=input.result;} else {event.status='failed';const code=Object.hasOwn(safe,input.failure)?input.failure:'NORMALIZATION_FAILED';event.error={code,message:safe[code],retryable:false};}\nif(Buffer.byteLength(JSON.stringify(event),'utf8')>5*1024*1024){delete event.result;event.status='failed';event.error={code:'OUTPUT_LIMIT',message:safe.OUTPUT_LIMIT,retryable:false};}\nreturn [{json:{event,deadline_at,retry_count:0}}];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "freeze-event",
+      "name": "Freeze event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const c=$input.first().json;if(Date.now()>=Date.parse(c.deadline_at))return [];return [{json:c}];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "delivery-context",
+      "name": "Delivery context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "POST",
+        "url": "={{ $('Entry').first().json.config.backendOrigin + '/api/workflows/extraction/events' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.event }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "timeout": "={{ Math.max(1,Math.min(30000,Date.parse($json.deadline_at)-Date.now())) }}"
+        }
+      },
+      "id": "deliver-event",
+      "name": "Deliver event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        780,
+        660
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "'use strict';\n// Pure, dependency-free helpers embedded into generated n8n Code nodes.\nfunction fail(code = 'NORMALIZATION_FAILED') { const e = new Error(code); e.code = code; throw e; }\nfunction object(x) { return x !== null && typeof x === 'object' && !Array.isArray(x); }\nfunction checkSchema(value, schema) {\n  if (schema.anyOf) { if (!schema.anyOf.some(s => { try { checkSchema(value,s); return true; } catch { return false; } })) fail(); return; }\n  if (schema.enum && !schema.enum.includes(value)) fail();\n  if (schema.type === 'null') { if (value !== null) fail(); return; }\n  if (schema.type === 'object') {\n    if (!object(value) || Object.keys(value).some(k => !Object.hasOwn(schema.properties,k))) fail();\n    // Nullable facts may be omitted at the canonical boundary, even though model requests require all keys.\n    for (const [k,v] of Object.entries(value)) checkSchema(v,schema.properties[k]);\n  } else if (schema.type === 'array') {\n    if (!Array.isArray(value) || value.length > (schema.maxItems ?? Infinity)) fail();\n    value.forEach(v => checkSchema(v,schema.items));\n  } else if (schema.type === 'number') { if (typeof value !== 'number' || !Number.isFinite(value)) fail(); }\n  else if (schema.type === 'string') { if (typeof value !== 'string' || value.length > (schema.maxLength ?? Infinity)) fail(); }\n}\nfunction business(raw, schema) {\n  if (!object(raw) || !object(raw.contract_data) || !Array.isArray(raw.parties_data)) fail();\n  const pending=[raw];\n  while(pending.length) { const value=pending.pop(); if(typeof value==='number' && !Number.isFinite(value)) fail(); if(value && typeof value==='object')pending.push(...Object.values(value)); }\n  const result = JSON.parse(JSON.stringify(raw));\n  const aliases = { 'quota share':'quota_share', 'quota-share':'quota_share', 'excess of loss':'xol', 'non proportional':'non-proportional', 'non_proportional':'non-proportional', 'facultative obligatory':'facultative_obligatory', 'facultative optional':'facultative_optional', 'cedent':'cedant' };\n  for (const facts of [result.contract_data,...result.parties_data]) {\n    for (const key of ['contract_type','contract_sub_type','contract_nature','role']) {\n      if (typeof facts[key] === 'string') { const label = facts[key].trim().toLowerCase(); facts[key] = aliases[label] ?? label; }\n    }\n  }\n  checkSchema(result,schema);\n  for (const k of ['effective_date','expiration_date','inception_date']) {\n    const v = result.contract_data[k];\n    if (v != null && (!/^\\d{4}-\\d{2}-\\d{2}$/.test(v) || !Number.isFinite(Date.parse(v)) || new Date(v).toISOString().slice(0,10) !== v)) fail();\n  }\n  for (const p of result.parties_data) if (typeof p.name !== 'string' || !p.name.trim() || /[\\x00-\\x1f\\x7f]/.test(p.name)) fail();\n  if (!result.parties_data.length && !Object.values(result.contract_data).some(v => v != null && (typeof v !== 'string' || v.trim()))) fail('NO_CONTRACT_DATA');\n  return result;\n}\nfunction usableHttp(response) { if (response?.statusCode !== 200 || !object(response.body)) fail('PROVIDER_UNAVAILABLE'); return response.body; }\nfunction safeVersion(v) { return typeof v === 'string' && v.length <= 256 && /^[A-Za-z0-9._:/-]+$/.test(v) ? v : undefined; }\nfunction metadata(config, provider, resolved) {\n  const m = {workflow_version:config.workflowVersion,provider,api_version:provider === 'openai' ? 'responses-v1' : 'ade-v1',model:provider === 'openai' ? config.openaiModel : config.landingExtractModel};\n  const version = safeVersion(resolved); if (version) m.model_version=version;\n  return m;\n}\nfunction normalizeOpenAI(response, config, schema) {\n  const body = usableHttp(response);\n  if (body.status !== 'completed' || body.error || body.incomplete_details) fail('PROVIDER_INCOMPLETE');\n  const content = (body.output ?? []).filter(o => o.type === 'message').flatMap(o => o.content ?? []);\n  if (content.some(c => c.type === 'refusal')) fail('PROVIDER_REFUSAL');\n  const text = content.filter(c => c.type === 'output_text').map(c => c.text);\n  if (text.length !== 1 || typeof text[0] !== 'string') fail();\n  let raw; try { raw=JSON.parse(text[0]); } catch { fail(); }\n  const result=business(raw,schema);\n  result.extraction_metadata={...metadata(config,'openai',body.model),warnings:['Source evidence unavailable; verify facts against the original.']};\n  return result;\n}\nfunction parseLanding(response, config) {\n  const body = usableHttp(response), m=body.metadata ?? {};\n  if (!body.markdown?.trim() || !Array.isArray(body.chunks) || !object(body.grounding) || (m.failed_pages?.length ?? 0) || (m.warnings?.length ?? 0) || (m.page_count ?? 0) > 100) fail('UNREADABLE_DOCUMENT');\n  if (m.version && m.version !== config.landingParseModel) fail('PROVIDER_VERSION_MISMATCH');\n  return body;\n}\nfunction plainText(html) {\n  return html.replace(/<[^>]*>/g,' ').replace(/^[ \\t]{0,3}#{1,6}[ \\t]+/gm,'').replace(/&(#x[0-9a-f]+|#\\d+|amp|lt|gt|quot|apos|nbsp);/gi, (s,v) => {\n    const named={amp:'&',lt:'<',gt:'>',quot:'\"',apos:\"'\",nbsp:' '};\n    if (named[v]) return named[v];\n    const code=v.startsWith('#x') ? parseInt(v.slice(2),16) : parseInt(v.slice(1),10);\n    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : s;\n  }).replace(/\\s+/g,' ').trim();\n}\nfunction referenceSource(parse, id, mime) {\n  if (typeof id !== 'string' || !id.trim() || id.length > 128 || /[\\x00-\\x1f\\x7f]/.test(id)) return undefined;\n  const location=parse.grounding[id]; if (!location) return undefined;\n  const chunk=parse.chunks.find(c => c.id === id);\n  if (chunk?.type === 'figure' || /Figure|Logo|ScanCode/.test(location.type ?? '')) return undefined;\n  let quote;\n  if (chunk) quote=plainText(chunk.markdown ?? '');\n  else {\n    // Only actual element content; never use the extracted value as a quote.\n    const escaped=id.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&');\n    const match=(parse.markdown ?? '').match(new RegExp('<([a-z][\\\\w:-]*)\\\\b[^>]*\\\\bid=[\"\\\\\\']'+escaped+'[\"\\\\\\'][^>]*>([\\\\s\\\\S]*?)<\\\\/\\\\1>','i'));\n    if (match && match[1].toLowerCase() !== 'a') quote=plainText(match[2]);\n    const parent=parse.chunks.find(c => c.id === location.position?.chunk_id);\n    if (parent?.type === 'figure') return undefined;\n  }\n  if (!quote || quote.length > 8000) return undefined;\n  const source={source_text:quote,chunk_id:id};\n  if (mime === 'application/pdf') {\n    if (!Number.isInteger(location.page) || location.page < 0) fail();\n    source.page_number=location.page+1;\n    if (location.box != null) {\n      const b=location.box;\n      if (!object(b) || Object.keys(b).sort().join() !== 'bottom,left,right,top' || !Object.values(b).every(v => typeof v === 'number' && Number.isFinite(v) && v>=0 && v<=1) || b.left>=b.right || b.top>=b.bottom) fail();\n      source.bbox={...b};\n    }\n  }\n  return source;\n}\nfunction normalizeLanding(response, parse, mime, config, schema) {\n  const body=usableHttp(response), m=body.metadata ?? {};\n  if (m.schema_violation_error || (m.warnings?.length ?? 0)) fail();\n  if (m.fallback_model_version || (m.version && m.version !== config.landingExtractModel)) fail('PROVIDER_VERSION_MISMATCH');\n  const result=business(body.extraction,schema), meta=body.extraction_metadata ?? {};\n  const refs=(facts,fields) => {\n    if (!object(fields)) return {};\n    const sources={};\n    for (const [key,field] of Object.entries(fields)) {\n      if (!object(field) || !Array.isArray(field.references) || !field.references.length) continue;\n      if (!Object.hasOwn(facts,key) || facts[key] == null) fail();\n      for (const id of field.references) { const s=referenceSource(parse,id,mime); if(s) { sources[key]=s; break; } }\n    }\n    return sources;\n  };\n  if (meta.parties_data != null && (!Array.isArray(meta.parties_data) || meta.parties_data.length !== result.parties_data.length)) fail();\n  result.field_sources={contract:refs(result.contract_data,meta.contract_data), parties:result.parties_data.map((p,i) => refs(p,meta.parties_data?.[i]))};\n  result.extraction_metadata=metadata(config,'landingai',m.version);\n  result.extraction_metadata.provider_version=safeVersion(parse.metadata?.version) ?? config.landingParseModel;\n  return result;\n}\nfunction validateDispatch(body) {\n  return object(body) && Object.keys(body).sort().join() === 'attempt_id,job_id,operation,schema_version' && body.schema_version === '1' && body.operation === 'extract_reinsurance_contract' && ['job_id','attempt_id'].every(k => typeof body[k] === 'string' && body[k].trim() && body[k].length <= 128 && !/[\\x00-\\x1f\\x7f]/.test(body[k]));\n}\nfunction claimDecision(response, dispatch, now=Date.now()) {\n  const b=response?.body;\n  if(response?.statusCode !== 200 || !object(b) || b.schema_version !== '1' || b.job_id !== dispatch.job_id || b.attempt_id !== dispatch.attempt_id || !['run','already_claimed'].includes(b.decision) || !Number.isFinite(Date.parse(b.deadline_at)) || Date.parse(b.deadline_at) <= now) return {run:false};\n  return {run:b.decision === 'run',deadline_at:b.deadline_at};\n}\nfunction callbackDecision(response, frozen, count, now=Date.now(), random=Math.random()) {\n  const code=response?.statusCode, b=response?.body;\n  if (code === 200 && object(b) && Object.keys(b).sort().join() === 'event_id,schema_version,status' && b.schema_version === '1' && b.status === 'acknowledged' && b.event_id === frozen.event.event_id) return {retry:false,reason:'acknowledged'};\n  const transient=!code || code === 429 || code >= 500 || (code>=200 && code<300);\n  if (!transient) return {retry:false,reason:'rejected'};\n  const remaining=(Date.parse(frozen.deadline_at)-now)/1000;\n  if (!(remaining > 0)) return {retry:false,reason:'deadline'};\n  let delay=Math.min(60,5*2**Math.min(count,4))*(0.8+0.2*random);\n  const headers=response?.headers ?? {};\n  const retryAfter=headers['retry-after'] ?? headers['Retry-After'];\n  if (retryAfter != null) {\n    const seconds=/^\\d+(\\.\\d+)?$/.test(String(retryAfter)) ? Number(retryAfter) : (Date.parse(retryAfter)-now)/1000;\n    if (Number.isFinite(seconds)) delay=Math.max(delay,Math.min(60,Math.max(0,seconds)));\n  }\n  if (remaining <= delay) return {retry:false,reason:'deadline'};\n  return {retry:true,delaySeconds:Math.ceil(delay),retry_count:count+1};\n}\n\n\nconst context=$('Delivery context').item.json;\nconst decision=callbackDecision($input.first().json,context,context.retry_count);\nreturn [{json:{...context,...decision}}];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "check-acknowledgement",
+      "name": "Check acknowledgement",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Retry callback",
+              "leftValue": "={{ $json.retry }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "retry-callback",
+      "name": "Retry callback",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1300,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": "={{ $json.delaySeconds }}",
+        "unit": "seconds"
+      },
+      "id": "callback-backoff",
+      "name": "Callback backoff",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        880
+      ],
+      "webhookId": "reink-callback-backoff"
+    }
+  ],
+  "connections": {
+    "Extraction webhook": {
+      "main": [
+        [
+          {
+            "node": "Entry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entry": {
+      "main": [
+        [
+          {
+            "node": "Dispatch permitted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch permitted": {
+      "main": [
+        [
+          {
+            "node": "Accept dispatch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject dispatch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accept dispatch": {
+      "main": [
+        [
+          {
+            "node": "Claim attempt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim attempt": {
+      "main": [
+        [
+          {
+            "node": "Claim gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim gate": {
+      "main": [
+        [
+          {
+            "node": "Owned active attempt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Owned active attempt": {
+      "main": [
+        [
+          {
+            "node": "Fetch original",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch original": {
+      "main": [
+        [
+          {
+            "node": "Prepare document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare document": {
+      "main": [
+        [
+          {
+            "node": "Document ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Document ready": {
+      "main": [
+        [
+          {
+            "node": "LandingAI selected",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Freeze event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LandingAI selected": {
+      "main": [
+        [
+          {
+            "node": "LandingAI Parse",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "OpenAI Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LandingAI Parse": {
+      "main": [
+        [
+          {
+            "node": "Prepare markdown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare markdown": {
+      "main": [
+        [
+          {
+            "node": "Markdown ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Markdown ready": {
+      "main": [
+        [
+          {
+            "node": "LandingAI Extract",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Freeze event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LandingAI Extract": {
+      "main": [
+        [
+          {
+            "node": "Normalize LandingAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize LandingAI": {
+      "main": [
+        [
+          {
+            "node": "Freeze event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Responses": {
+      "main": [
+        [
+          {
+            "node": "Normalize OpenAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize OpenAI": {
+      "main": [
+        [
+          {
+            "node": "Freeze event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Freeze event": {
+      "main": [
+        [
+          {
+            "node": "Delivery context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delivery context": {
+      "main": [
+        [
+          {
+            "node": "Deliver event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deliver event": {
+      "main": [
+        [
+          {
+            "node": "Check acknowledgement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check acknowledgement": {
+      "main": [
+        [
+          {
+            "node": "Retry callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry callback": {
+      "main": [
+        [
+          {
+            "node": "Callback backoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Callback backoff": {
+      "main": [
+        [
+          {
+            "node": "Delivery context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false,
+    "executionTimeout": 660
+  },
+  "pinData": {},
+  "tags": []
+}

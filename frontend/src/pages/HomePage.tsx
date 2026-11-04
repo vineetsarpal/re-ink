@@ -91,7 +91,7 @@ export const HomePage: React.FC = () => {
             </div>
             <h3>AI-Powered Extraction</h3>
             <p>
-              Powered by LandingAI's agentic document extraction, automatically extract
+              A separately hosted workflow extracts
               contract terms, parties, dates, and financial details.
             </p>
           </div>
@@ -122,10 +122,10 @@ export const HomePage: React.FC = () => {
             <div className="feature-icon">
               <Bot size={28} />
             </div>
-            <h3>Autonomous AI Agents</h3>
+            <h3>Human Review</h3>
             <p>
-              Embedded agents coordinate ingestion, extraction, and QA so your team
-              can focus on decision-making instead of manual data wrangling.
+              Verify available source evidence and correct missing or uncertain values.
+              Guided intake and automated review agents are disabled.
             </p>
           </div>
 

@@ -1,0 +1,351 @@
+{
+  "schema_version": 1,
+  "authorship": "Synthetic source and expected values authored before any provider execution; never derived from provider output.",
+  "human_ground_truth_review": "pending",
+  "live_provider_executions": 0,
+  "cases": [
+    {
+      "case_id": "ordinary",
+      "file": "ordinary.pdf",
+      "expected_outcome": "completed",
+      "fields": {
+        "contract_number": "SYN-001",
+        "contract_name": "Synthetic Cedar Treaty",
+        "effective_date": "2027-01-01",
+        "expiration_date": "2027-12-31",
+        "currency": "USD",
+        "premium_amount": 120000,
+        "limit_amount": 2000000,
+        "retention_amount": 10000,
+        "contract_sub_type": "quota_share"
+      },
+      "missing_fields": [],
+      "ambiguous_fields": [],
+      "parties": [
+        {
+          "name": "Cedar Example Insurance Ltd",
+          "role": "cedant"
+        },
+        {
+          "name": "Harbor Example Re Ltd",
+          "role": "reinsurer"
+        }
+      ],
+      "source_lines": [
+        "Reinsurance Contract",
+        "Contract number: SYN-001",
+        "Contract name: Synthetic Cedar Treaty",
+        "Effective date: 2027-01-01",
+        "Expiration date: 2027-12-31",
+        "Currency: USD",
+        "Premium: USD 120000",
+        "Coverage limit: USD 2000000",
+        "Deductible: USD 10000",
+        "Cedant: Cedar Example Insurance Ltd",
+        "Reinsurer: Harbor Example Re Ltd",
+        "Type: Quota Share",
+        "This contract reinsures the cedant property portfolio."
+      ],
+      "evidence": {
+        "manual_verification_required": true,
+        "coordinates_expected": true,
+        "page_number": 1,
+        "quotes_available": [
+          "Reinsurance Contract",
+          "Contract number: SYN-001",
+          "Contract name: Synthetic Cedar Treaty",
+          "Effective date: 2027-01-01",
+          "Expiration date: 2027-12-31",
+          "Currency: USD",
+          "Premium: USD 120000",
+          "Coverage limit: USD 2000000",
+          "Deductible: USD 10000",
+          "Cedant: Cedar Example Insurance Ltd",
+          "Reinsurer: Harbor Example Re Ltd",
+          "Type: Quota Share",
+          "This contract reinsures the cedant property portfolio."
+        ],
+        "boxes": "Check any supplied boxes against original; no guessed ground-truth rectangles."
+      }
+    },
+    {
+      "case_id": "scanned",
+      "file": "scanned.pdf",
+      "expected_outcome": "completed",
+      "fields": {
+        "contract_number": "SYN-001",
+        "contract_name": "Synthetic Cedar Treaty",
+        "effective_date": "2027-01-01",
+        "expiration_date": "2027-12-31",
+        "currency": "USD",
+        "premium_amount": 120000,
+        "limit_amount": 2000000,
+        "retention_amount": 10000,
+        "contract_sub_type": "quota_share"
+      },
+      "missing_fields": [],
+      "ambiguous_fields": [],
+      "parties": [
+        {
+          "name": "Cedar Example Insurance Ltd",
+          "role": "cedant"
+        },
+        {
+          "name": "Harbor Example Re Ltd",
+          "role": "reinsurer"
+        }
+      ],
+      "source_lines": [
+        "Reinsurance Contract",
+        "Contract number: SYN-001",
+        "Contract name: Synthetic Cedar Treaty",
+        "Effective date: 2027-01-01",
+        "Expiration date: 2027-12-31",
+        "Currency: USD",
+        "Premium: USD 120000",
+        "Coverage limit: USD 2000000",
+        "Deductible: USD 10000",
+        "Cedant: Cedar Example Insurance Ltd",
+        "Reinsurer: Harbor Example Re Ltd",
+        "Type: Quota Share",
+        "This contract reinsures the cedant property portfolio."
+      ],
+      "evidence": {
+        "manual_verification_required": true,
+        "coordinates_expected": true,
+        "page_number": 1,
+        "quotes_available": [
+          "Reinsurance Contract",
+          "Contract number: SYN-001",
+          "Contract name: Synthetic Cedar Treaty",
+          "Effective date: 2027-01-01",
+          "Expiration date: 2027-12-31",
+          "Currency: USD",
+          "Premium: USD 120000",
+          "Coverage limit: USD 2000000",
+          "Deductible: USD 10000",
+          "Cedant: Cedar Example Insurance Ltd",
+          "Reinsurer: Harbor Example Re Ltd",
+          "Type: Quota Share",
+          "This contract reinsures the cedant property portfolio."
+        ],
+        "boxes": "Check any supplied boxes against original; no guessed ground-truth rectangles."
+      }
+    },
+    {
+      "case_id": "docx",
+      "file": "docx.docx",
+      "expected_outcome": "completed",
+      "fields": {
+        "contract_number": "SYN-003",
+        "contract_name": "Synthetic Cedar Treaty",
+        "effective_date": "2027-01-01",
+        "expiration_date": "2027-12-31",
+        "currency": "USD",
+        "premium_amount": 120000,
+        "limit_amount": 2000000,
+        "retention_amount": 10000,
+        "contract_sub_type": "quota_share"
+      },
+      "missing_fields": [],
+      "ambiguous_fields": [],
+      "parties": [
+        {
+          "name": "Cedar Example Insurance Ltd",
+          "role": "cedant"
+        },
+        {
+          "name": "Harbor Example Re Ltd",
+          "role": "reinsurer"
+        }
+      ],
+      "source_lines": [
+        "Reinsurance Contract",
+        "Contract number: SYN-003",
+        "Contract name: Synthetic Cedar Treaty",
+        "Effective date: 2027-01-01",
+        "Expiration date: 2027-12-31",
+        "Currency: USD",
+        "Premium: USD 120000",
+        "Coverage limit: USD 2000000",
+        "Deductible: USD 10000",
+        "Cedant: Cedar Example Insurance Ltd",
+        "Reinsurer: Harbor Example Re Ltd",
+        "Type: Quota Share",
+        "This contract reinsures the cedant property portfolio."
+      ],
+      "evidence": {
+        "manual_verification_required": true,
+        "coordinates_expected": false,
+        "page_number": null,
+        "quotes_available": [
+          "Reinsurance Contract",
+          "Contract number: SYN-003",
+          "Contract name: Synthetic Cedar Treaty",
+          "Effective date: 2027-01-01",
+          "Expiration date: 2027-12-31",
+          "Currency: USD",
+          "Premium: USD 120000",
+          "Coverage limit: USD 2000000",
+          "Deductible: USD 10000",
+          "Cedant: Cedar Example Insurance Ltd",
+          "Reinsurer: Harbor Example Re Ltd",
+          "Type: Quota Share",
+          "This contract reinsures the cedant property portfolio."
+        ],
+        "boxes": "Check any supplied boxes against original; no guessed ground-truth rectangles."
+      }
+    },
+    {
+      "case_id": "ambiguous",
+      "file": "ambiguous.pdf",
+      "expected_outcome": "completed",
+      "fields": {
+        "contract_number": "SYN-004",
+        "contract_name": "Synthetic Ambiguous Treaty",
+        "expiration_date": "2027-12-31"
+      },
+      "missing_fields": [
+        "currency",
+        "limit_amount",
+        "retention_amount",
+        "contract_sub_type"
+      ],
+      "ambiguous_fields": [
+        "effective_date",
+        "premium_amount"
+      ],
+      "parties": [
+        {
+          "name": "Cedar Example Insurance Ltd",
+          "role": "cedant"
+        },
+        {
+          "name": "Harbor Example Re Ltd",
+          "role": "reinsurer"
+        }
+      ],
+      "source_lines": [
+        "Reinsurance Contract",
+        "Contract number: SYN-004",
+        "Contract name: Synthetic Ambiguous Treaty",
+        "Effective date may be 03/04/2027; day/month order is unspecified.",
+        "Expiration date: 2027-12-31",
+        "Premium proposed at $100000; denomination is not specified.",
+        "Cedant: Cedar Example Insurance Ltd",
+        "Reinsurer: Harbor Example Re Ltd",
+        "No currency is agreed. No binding effective date is agreed."
+      ],
+      "evidence": {
+        "manual_verification_required": true,
+        "coordinates_expected": true,
+        "page_number": 1,
+        "quotes_available": [
+          "Reinsurance Contract",
+          "Contract number: SYN-004",
+          "Contract name: Synthetic Ambiguous Treaty",
+          "Effective date may be 03/04/2027; day/month order is unspecified.",
+          "Expiration date: 2027-12-31",
+          "Premium proposed at $100000; denomination is not specified.",
+          "Cedant: Cedar Example Insurance Ltd",
+          "Reinsurer: Harbor Example Re Ltd",
+          "No currency is agreed. No binding effective date is agreed."
+        ],
+        "boxes": "Check any supplied boxes against original; no guessed ground-truth rectangles."
+      }
+    },
+    {
+      "case_id": "multiple",
+      "file": "multiple.pdf",
+      "expected_outcome": "completed",
+      "fields": {
+        "contract_number": "SYN-005",
+        "contract_name": "Synthetic Cedar Treaty",
+        "effective_date": "2027-01-01",
+        "expiration_date": "2027-12-31",
+        "currency": "USD",
+        "premium_amount": 120000,
+        "limit_amount": 2000000,
+        "retention_amount": 10000,
+        "contract_sub_type": "quota_share"
+      },
+      "missing_fields": [],
+      "ambiguous_fields": [],
+      "parties": [
+        {
+          "name": "Cedar Example Insurance Ltd",
+          "role": "cedant"
+        },
+        {
+          "name": "Harbor Example Re Ltd",
+          "role": "reinsurer"
+        },
+        {
+          "name": "Maple Example Brokers Ltd",
+          "role": "broker"
+        },
+        {
+          "name": "Summit Example Re Ltd",
+          "role": "reinsurer"
+        }
+      ],
+      "source_lines": [
+        "Reinsurance Contract",
+        "Contract number: SYN-005",
+        "Contract name: Synthetic Cedar Treaty",
+        "Effective date: 2027-01-01",
+        "Expiration date: 2027-12-31",
+        "Currency: USD",
+        "Premium: USD 120000",
+        "Coverage limit: USD 2000000",
+        "Deductible: USD 10000",
+        "Cedant: Cedar Example Insurance Ltd",
+        "Reinsurer: Harbor Example Re Ltd",
+        "Type: Quota Share",
+        "This contract reinsures the cedant property portfolio.",
+        "Broker: Maple Example Brokers Ltd",
+        "Additional reinsurer: Summit Example Re Ltd"
+      ],
+      "evidence": {
+        "manual_verification_required": true,
+        "coordinates_expected": true,
+        "page_number": 1,
+        "quotes_available": [
+          "Reinsurance Contract",
+          "Contract number: SYN-005",
+          "Contract name: Synthetic Cedar Treaty",
+          "Effective date: 2027-01-01",
+          "Expiration date: 2027-12-31",
+          "Currency: USD",
+          "Premium: USD 120000",
+          "Coverage limit: USD 2000000",
+          "Deductible: USD 10000",
+          "Cedant: Cedar Example Insurance Ltd",
+          "Reinsurer: Harbor Example Re Ltd",
+          "Type: Quota Share",
+          "This contract reinsures the cedant property portfolio.",
+          "Broker: Maple Example Brokers Ltd",
+          "Additional reinsurer: Summit Example Re Ltd"
+        ],
+        "boxes": "Check any supplied boxes against original; no guessed ground-truth rectangles."
+      }
+    },
+    {
+      "case_id": "unreadable",
+      "file": "unreadable.pdf",
+      "expected_outcome": "failed",
+      "fields": {},
+      "missing_fields": [],
+      "ambiguous_fields": [],
+      "parties": [],
+      "source_lines": [],
+      "evidence": {
+        "manual_verification_required": true,
+        "coordinates_expected": false,
+        "page_number": 1,
+        "quotes_available": [],
+        "boxes": "Check any supplied boxes against original; no guessed ground-truth rectangles."
+      }
+    }
+  ]
+}

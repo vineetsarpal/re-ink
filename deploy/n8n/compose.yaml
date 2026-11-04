@@ -1,0 +1,62 @@
+name: reink-workflows
+services:
+  proxy:
+    image: caddy:2.10.2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      N8N_HOSTNAME: ${N8N_HOSTNAME:?Set the operator-controlled hostname}
+      N8N_ADMIN_PASSWORD_HASH: ${N8N_ADMIN_PASSWORD_HASH:?Set a Caddy password hash}
+      N8N_ADMIN_USER: ${N8N_ADMIN_USER:?Set an independent proxy login}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [n8n]
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.43.4
+    restart: unless-stopped
+    environment:
+      N8N_HOST: ${N8N_HOSTNAME:?Set hostname}
+      N8N_PROTOCOL: https
+      N8N_WEBHOOK_URL: https://${N8N_HOSTNAME}/
+      N8N_EDITOR_BASE_URL: https://${N8N_HOSTNAME}/
+      N8N_PROXY_HOPS: 1
+      N8N_ENCRYPTION_KEY_FILE: /run/secrets/n8n_encryption_key
+      EXECUTIONS_MODE: regular
+      N8N_DEFAULT_BINARY_DATA_MODE: filesystem
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: 168
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
+      EXECUTIONS_DATA_SAVE_ON_ERROR: all
+      EXECUTIONS_DATA_SAVE_ON_PROGRESS: "false"
+      EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS: "false"
+      EXECUTIONS_TIMEOUT: 660
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "true"
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_LOG_LEVEL: warn
+      N8N_LOG_OUTPUT: console
+    secrets: [n8n_encryption_key]
+    volumes: ["n8n_data:/home/node/.n8n"]
+    logging: {driver: none}
+  dispatcher:
+    build: {context: ../.., dockerfile: deploy/n8n/Dockerfile}
+    restart: unless-stopped
+    env_file: [./dispatcher.env]
+    command: ["/app/.venv/bin/python", "-m", "app.worker"]
+    logging: {driver: journald, options: {tag: reink-dispatcher}}
+  cleanup:
+    profiles: [cleanup]
+    build: {context: ../.., dockerfile: deploy/n8n/Dockerfile}
+    restart: unless-stopped
+    env_file: [./cleanup.env]
+    command: ["/app/.venv/bin/python", "-m", "app.worker", "--cleanup"]
+    logging: {driver: journald, options: {tag: reink-cleanup}}
+secrets:
+  n8n_encryption_key:
+    file: ./secrets/n8n_encryption_key
+volumes:
+  n8n_data:
+  caddy_data:
+  caddy_config:

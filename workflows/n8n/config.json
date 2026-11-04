@@ -1,0 +1,9 @@
+{
+  "workflowVersion": "reink-extraction-v1.0.0",
+  "backendOrigin": "https://reink.example.invalid",
+  "provider": "landingai",
+  "landingParseModel": "SET_COMPATIBLE_PARSE_MODEL",
+  "landingExtractModel": "SET_COMPATIBLE_EXTRACT_MODEL",
+  "openaiModel": "SET_COMPATIBLE_MODEL",
+  "prompt": "Extract only facts explicitly stated in this reinsurance contract. Unknown fields must be null. Do not infer numbers, currency, dates, names, or roles. Use canonical schema category labels. Dates use YYYY-MM-DD. Commission rates use percentage points. Preserve ambiguous financial wording in description fields and leave uncertain numeric values null. Return parties in document order. Do not return citations, confidence, or extra fields."
+}

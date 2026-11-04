@@ -12,10 +12,15 @@ from app.api.endpoints import (
     review,
     system,
     widgets,
+    workflows,
 )
 from app.core.auth import get_current_user
 
 api_router = APIRouter()
+
+# Machine routes authenticate with the separately scoped workflow credential.
+# They must never inherit the WorkOS dependency or approval permissions.
+api_router.include_router(workflows.router)
 
 # Every resource router requires a valid WorkOS access token. The public
 # endpoints (`/` and `/health`) live in app.main, outside this router.

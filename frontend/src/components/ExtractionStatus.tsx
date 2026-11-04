@@ -1,124 +1,53 @@
-/**
- * ExtractionStatus component for displaying document extraction progress.
- * Polls the backend for status updates and displays results when complete.
- */
-import React, { useEffect, useState } from 'react';
+/** Poll active workflow jobs; terminal states require explicit Retry. */
+import React, { useEffect, useRef, useState } from 'react';
 import { CheckCircle, XCircle, Loader, Clock } from 'lucide-react';
 import { documentApi } from '@/services/api';
-import type { DocumentExtractionStatus } from '@/types';
-
+import type { DocumentExtractionStatus, DocumentUploadResponse } from '@/types';
 interface ExtractionStatusProps {
   jobId: string;
   onComplete?: (status: DocumentExtractionStatus) => void;
-  onError?: (error: string) => void;
+  retryAvailable?: boolean;
+  onRetry?: (response: DocumentUploadResponse) => void;
 }
-
-export const ExtractionStatus: React.FC<ExtractionStatusProps> = ({
-  jobId,
-  onComplete,
-  onError,
-}) => {
+export const ExtractionStatus: React.FC<ExtractionStatusProps> = ({ jobId, onComplete, retryAvailable, onRetry }) => {
   const [status, setStatus] = useState<DocumentExtractionStatus | null>(null);
-  const [isPolling, setIsPolling] = useState(true);
-
+  const [error, setError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  const [generation, setGeneration] = useState(0);
+  const complete = useRef(onComplete); complete.current = onComplete;
   useEffect(() => {
-    let intervalId: ReturnType<typeof setInterval>;
-
-    const pollStatus = async () => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    setStatus(null); setError(null);
+    const poll = async () => {
       try {
         const response = await documentApi.getStatus(jobId);
+        if (cancelled) return;
         setStatus(response);
-
-        // Stop polling if job is complete or failed
-        if (response.status === 'completed') {
-          setIsPolling(false);
-          onComplete?.(response);
-        } else if (response.status === 'failed') {
-          setIsPolling(false);
-          onError?.(response.message || 'Extraction failed');
-        }
-      } catch (err: any) {
-        console.error('Error polling status:', err);
-        onError?.(err.response?.data?.detail || 'Failed to get status');
-        setIsPolling(false);
-      }
+        if (response.status === 'completed') complete.current?.(response);
+        else if (response.status === 'queued' || response.status === 'processing') timer = setTimeout(poll, 3000);
+      } catch { if (!cancelled) setError('Unable to retrieve extraction status. Refresh the page to check again.'); }
     };
-
-    // Initial poll
-    pollStatus();
-
-    // Set up polling interval if still processing
-    if (isPolling) {
-      intervalId = setInterval(pollStatus, 3000); // Poll every 3 seconds
-    }
-
-    return () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
-    };
-  }, [jobId, isPolling, onComplete, onError]);
-
-  const getStatusIcon = () => {
-    if (!status) return <Clock size={24} />;
-
-    switch (status.status) {
-      case 'completed':
-        return <CheckCircle size={24} className="text-success" />;
-      case 'failed':
-        return <XCircle size={24} className="text-error" />;
-      case 'processing':
-      case 'submitted_to_ai':
-        return <Loader size={24} className="spinner" />;
-      default:
-        return <Clock size={24} />;
-    }
+    void poll();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [jobId, generation]);
+  const retry = async () => {
+    setRetrying(true); setError(null);
+    try { const response = await documentApi.retry(jobId); onRetry?.(response); setGeneration(n => n + 1); }
+    catch { setError('Retry was not accepted. Check availability and permissions, then try again.'); }
+    finally { setRetrying(false); }
   };
-
-  const getStatusMessage = () => {
-    if (!status) return 'Checking status...';
-
-    switch (status.status) {
-      case 'completed':
-        return 'Extraction completed successfully!';
-      case 'failed':
-        return status.message || 'Extraction failed';
-      case 'processing':
-        return 'Processing document...';
-      case 'submitted_to_ai':
-        return 'Document submitted for AI extraction...';
-      default:
-        return status.message || 'Processing...';
-    }
-  };
-
-  return (
-    <div className="extraction-status">
-      <div className="status-header">
-        {getStatusIcon()}
-        <h3>{getStatusMessage()}</h3>
-      </div>
-
-      {status?.result && status.status === 'completed' && (
-        <div className="status-details">
-          <p className="text-muted">
-            Confidence Score:{' '}
-            {status.result.confidence_score
-              ? `${(status.result.confidence_score * 100).toFixed(1)}%`
-              : 'N/A'}
-          </p>
-          <p className="text-muted">Job ID: {jobId}</p>
-        </div>
-      )}
-
-      {isPolling && (
-        <div className="polling-indicator">
-          <div className="progress-bar">
-            <div className="progress-bar-fill"></div>
-          </div>
-          <p className="text-muted">Checking for updates...</p>
-        </div>
-      )}
+  const failed = status?.status === 'failed' || status?.status === 'timed_out';
+  const active = !error && (!status || status.status === 'queued' || status.status === 'processing');
+  return <div className="extraction-status">
+    <div className="status-header">
+      {failed ? <XCircle size={24} /> : status?.status === 'completed' ? <CheckCircle size={24} /> : active ? <Loader size={24} className="spinner" /> : <Clock size={24} />}
+      <h3>{status?.status === 'queued' ? 'Queued for extraction' : status?.status === 'timed_out' ? 'Extraction timed out' : status?.status === 'failed' ? 'Extraction failed' : status?.status === 'completed' ? 'Extraction completed' : 'Processing document…'}</h3>
     </div>
-  );
+    {status?.message && <p>{status.message}</p>}
+    {error && <p role="alert">{error}</p>}
+    {active && <p>Checking for updates…</p>}
+    {failed && retryAvailable && <button className="btn btn-primary" disabled={retrying} onClick={retry}>{retrying ? 'Queuing…' : 'Retry extraction'}</button>}
+    <p className="text-muted">Job ID: {jobId}</p>
+  </div>;
 };
