@@ -1,5 +1,5 @@
 """
-Disabled legacy agent endpoints; permissions remain enforced.
+Endpoints exposing LangChain/LangGraph powered agents.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -12,6 +12,7 @@ from app.schemas.agent import (
     GuidedIntakeRequest,
     GuidedIntakeResponse,
 )
+from app.services.agent_service import AgentConfigurationError, agent_service
 
 router = APIRouter()
 
@@ -23,7 +24,10 @@ async def run_guided_intake_agent(
     _user=Depends(require_permission("document:upload")),
 ) -> GuidedIntakeResponse:
     """Run the guided contract intake agent against a completed extraction job."""
-    raise HTTPException(status_code=503, detail="Guided intake is disabled for workflow extraction.")
+    try:
+        return agent_service.run_guided_intake(db, request)
+    except AgentConfigurationError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.post("/review", response_model=AutomatedReviewResponse, tags=["agents"])
@@ -33,4 +37,7 @@ def run_automated_review_agent(
     _user=Depends(require_permission("contract:read")),
 ) -> AutomatedReviewResponse:
     """Generate an automated review for an existing contract."""
-    raise HTTPException(status_code=503, detail="Automated review is disabled for workflow extraction.")
+    try:
+        return agent_service.run_automated_review(db=db, request=request)
+    except AgentConfigurationError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))

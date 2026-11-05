@@ -34,6 +34,7 @@ def approve_extracted_data(
     try:
         logger.info("=== Starting approve_extracted_data ===")
         logger.info(f"Received {len(review_data.parties)} parties")
+        logger.info(f"Contract data: {review_data.contract.model_dump()}")
 
         # Check if contract already exists by contract_number
         existing_contract = None
@@ -43,7 +44,7 @@ def approve_extracted_data(
             ).first()
 
         if existing_contract:
-            logger.warning("Approval rejected: duplicate contract ID %s", existing_contract.id)
+            logger.warning(f"Contract with number {review_data.contract.contract_number} already exists (ID: {existing_contract.id})")
             raise HTTPException(
                 status_code=409,
                 detail={
@@ -66,7 +67,7 @@ def approve_extracted_data(
                 existing_party = db.query(Party).filter(Party.id == party_action.existing_party_id).first()
                 if not existing_party:
                     raise HTTPException(status_code=404, detail=f"Party with ID {party_action.existing_party_id} not found")
-                logger.info("Approval links existing party ID %s", existing_party.id)
+                logger.info(f"Using existing party: {existing_party.name} (role: {party_action.role})")
                 party_ids.append(existing_party.id)
                 party_roles.append(party_action.role)
                 party_status.append({"id": existing_party.id, "name": existing_party.name, "status": "existing"})
@@ -77,7 +78,7 @@ def approve_extracted_data(
                 new_party = Party(**party_action.party_data.model_dump())
                 db.add(new_party)
                 db.flush()
-                logger.info("Approval creates party ID %s", new_party.id)
+                logger.info(f"Created new party: {new_party.name} (role: {party_action.role})")
                 party_ids.append(new_party.id)
                 party_roles.append(party_action.role)
                 party_status.append({"id": new_party.id, "name": new_party.name, "status": "created"})
@@ -125,7 +126,7 @@ def approve_extracted_data(
         db.commit()
         db.refresh(contract)
 
-        logger.info("Contract approved and created: ID %s", contract.id)
+        logger.info(f"Contract approved and created: {contract.contract_number}")
 
         # Build informative message
         new_parties = [p for p in party_status if p["status"] == "created"]
@@ -148,10 +149,10 @@ def approve_extracted_data(
         raise
     except Exception as e:
         db.rollback()
-        logger.error("Error approving extracted data")
+        logger.error(f"Error approving extracted data: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail="Error creating contract and parties"
+            detail=f"Error creating contract and parties: {str(e)}"
         )
 
 
@@ -174,7 +175,7 @@ def reject_extracted_data(
         # 2. Log the rejection reason for analytics
         # 3. Potentially trigger a manual review workflow
 
-        logger.info("Extraction rejected for job %s", job_id)
+        logger.info(f"Extraction rejected for job {job_id}: {reason}")
 
         return {
             "message": "Extraction rejected successfully",

@@ -1,55 +1,273 @@
-/** Upload, durable workflow status, and human review. */
-import React, { useEffect, useState } from 'react';
+/**
+ * UploadPage - Full workflow for uploading and processing documents.
+ */
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@workos-inc/authkit-react';
 import { FileUpload } from '@/components/FileUpload';
 import { ExtractionStatus } from '@/components/ExtractionStatus';
 import { ReviewForm } from '@/components/ReviewForm';
-import { documentApi, systemApi } from '@/services/api';
-import type { DocumentUploadResponse, DocumentExtractionStatus, SystemConfig } from '@/types';
+import {
+  agentApi,
+  documentApi,
+  systemApi,
+  type DocumentFileSource,
+} from '@/services/api';
+import type {
+  DocumentUploadResponse,
+  DocumentExtractionStatus,
+  GuidedIntakeResponse,
+} from '@/types';
+
+type WorkflowStep = 'upload' | 'processing' | 'review';
+
+// PDFs bundled in `public/samples/`. Mock jobs carry no file on disk, so when a
+// mock scenario's filename matches a bundled sample we preview that copy — this
+// makes the source-grounded document view (bounding boxes) demonstrable offline.
+const BUNDLED_SAMPLES = new Set([
+  'excess-of-loss-reinsurance-agreement.pdf',
+  'quota-share-reinsurance-contract.pdf',
+]);
+
+/** Resolve the document source for the review preview, real jobs and mocks. */
+const resolveDocumentSource = (
+  uploadResponse: DocumentUploadResponse | null,
+  isMockJob: boolean,
+  status: DocumentExtractionStatus | null,
+): DocumentFileSource | null => {
+  if (!uploadResponse) return null;
+  if (!isMockJob) return documentApi.getFileSource(uploadResponse.job_id);
+  const filename = status?.result?.extraction_metadata?.filename;
+  return filename && BUNDLED_SAMPLES.has(filename)
+    ? { kind: 'public', url: `/samples/${filename}` }
+    : null;
+};
 
 export const UploadPage: React.FC = () => {
   const navigate = useNavigate();
-  const { permissions } = useAuth();
-  const [upload, setUpload] = useState<DocumentUploadResponse | null>(null);
-  const [result, setResult] = useState<DocumentExtractionStatus | null>(null);
-  const [config, setConfig] = useState<SystemConfig | null>(null);
-  const [configError, setConfigError] = useState(false);
-  useEffect(() => { systemApi.getConfig().then(setConfig).catch(() => setConfigError(true)); }, []);
-  const reset = () => { setUpload(null); setResult(null); };
-  const reject = async () => {
-    if (!upload) return;
-    try { await documentApi.delete(upload.job_id); reset(); }
-    catch { alert('Unable to delete extraction. Please try again.'); }
+  const [currentStep, setCurrentStep] = useState<WorkflowStep>('upload');
+  const [uploadResponse, setUploadResponse] = useState<DocumentUploadResponse | null>(
+    null
+  );
+  const [extractionStatus, setExtractionStatus] =
+    useState<DocumentExtractionStatus | null>(null);
+  const [isSeedingMock, setIsSeedingMock] = useState(false);
+  // Mock jobs carry no file on disk, so the document preview is unavailable.
+  const [isMockJob, setIsMockJob] = useState(false);
+  const [intakeAgent, setIntakeAgent] = useState<GuidedIntakeResponse | null>(null);
+  const [isIntakeLoading, setIsIntakeLoading] = useState(false);
+  const [intakeError, setIntakeError] = useState<string | null>(null);
+  const lastAgentJobId = useRef<string | null>(null);
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
+
+  const handleUploadSuccess = (response: DocumentUploadResponse) => {
+    setUploadResponse(response);
+    setIsMockJob(false);
+    setCurrentStep('processing');
+    setIntakeAgent(null);
+    setIntakeError(null);
   };
-  const downloadOriginal = async () => {
-    if (!upload) return;
+
+  const handleExtractionComplete = (status: DocumentExtractionStatus) => {
+    setExtractionStatus(status);
+    if (status.result) {
+      setCurrentStep('review');
+    }
+  };
+
+  const handleReject = async () => {
+    if (uploadResponse) {
+      try {
+        await documentApi.delete(uploadResponse.job_id);
+        alert('Extraction rejected and document deleted');
+        setCurrentStep('upload');
+        setUploadResponse(null);
+        setExtractionStatus(null);
+        setIntakeAgent(null);
+        setIntakeError(null);
+        lastAgentJobId.current = null;
+      } catch (err) {
+        console.error('Error rejecting:', err);
+      }
+    }
+  };
+
+  const handleCancel = () => {
+    if (confirm('Are you sure you want to cancel? This will discard all progress.')) {
+      setCurrentStep('upload');
+      setUploadResponse(null);
+      setExtractionStatus(null);
+      setIntakeAgent(null);
+      setIntakeError(null);
+      lastAgentJobId.current = null;
+    }
+  };
+
+  const handleSeedMock = async () => {
     try {
-      const data = await documentApi.getFileData(upload.job_id);
-      const url = URL.createObjectURL(new Blob([data as BlobPart]));
-      const link = document.createElement('a'); link.href = url; link.download = upload.filename; link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch { alert('Unable to download the original document.'); }
+      setIsSeedingMock(true);
+      const status = await documentApi.seedMockJob();
+      const filename =
+        status.result?.extraction_metadata?.filename ?? 'mock_contract.pdf';
+      const mockUpload: DocumentUploadResponse = {
+        job_id: status.job_id,
+        filename,
+        file_path: `/mock/${status.job_id}.pdf`,
+        message: status.message ?? 'Mock extraction job created.',
+        status: status.status,
+      };
+      setUploadResponse(mockUpload);
+      setIsMockJob(true);
+      setExtractionStatus(status);
+      setCurrentStep(status.result ? 'review' : 'processing');
+      setIntakeAgent(null);
+      setIntakeError(null);
+      lastAgentJobId.current = null;
+    } catch (error: any) {
+      const message =
+        error?.response?.data?.detail ?? 'Failed to create mock extraction job.';
+      alert(message);
+    } finally {
+      setIsSeedingMock(false);
+    }
   };
-  const isDocx = upload?.filename.toLowerCase().endsWith('.docx');
-  return <div className="upload-page">
-    <div className="page-header"><h1>Upload Contract Document</h1></div>
-    <p>Simulated customer demo: use synthetic documents only. Extraction runs in a separately hosted workflow and sends documents to an external AI provider. Human approval creates local records.</p>
-    {!upload && (config?.workflow_extraction_enabled && permissions.includes('document:upload')
-      ? <FileUpload onUploadSuccess={(response) => { setUpload(response); setResult(null); }} />
-      : <p>{configError ? 'Unable to check extraction availability.' : !config ? 'Checking extraction availability…' : 'Document uploads are currently unavailable.'}</p>)}
-    {upload && !result?.result && <>
-      <ExtractionStatus jobId={upload.job_id} onComplete={setResult}
-        retryAvailable={!!config?.workflow_retry_available && permissions.includes('document:upload')}
-        onRetry={(response) => { setUpload(response); setResult(null); }} />
-      <button className="btn btn-secondary" onClick={reset}>Back to upload</button>
-    </>}
-    {upload && result?.result && <>
-      {isDocx && <p>DOCX inline preview and page highlights are unavailable. Verify text evidence against the downloaded original. <button type="button" className="btn btn-secondary" onClick={downloadOriginal}>Download original DOCX</button></p>}
-      <ReviewForm extractionResult={result.result}
-        documentSource={isDocx ? null : documentApi.getFileSource(upload.job_id)}
-        onApprove={(id, _partyIds, message) => { alert(message); navigate(`/contracts/${id}`); }}
-        onReject={reject} onCancel={reset} />
-    </>}
-  </div>;
+
+  const fetchIntakeAgent = useCallback(async () => {
+    const jobId = uploadResponse?.job_id;
+    if (!jobId) return;
+    setIsIntakeLoading(true);
+    setIntakeError(null);
+    try {
+      const response = await agentApi.runIntake(jobId);
+      setIntakeAgent(response);
+      lastAgentJobId.current = jobId;
+    } catch (error: any) {
+      console.error('Failed to fetch guided intake agent response', error);
+      const message =
+        error?.response?.data?.detail ??
+        error?.message ??
+        'Unable to retrieve AI intake guidance.';
+      setIntakeError(message);
+    } finally {
+      setIsIntakeLoading(false);
+    }
+  }, [uploadResponse?.job_id]);
+
+  useEffect(() => {
+    systemApi
+      .getConfig()
+      .then((config) => setIsOfflineMode(config.agent_offline_mode))
+      .catch((error) => {
+        console.error('Failed to load system configuration', error);
+      });
+  }, []);
+
+  useEffect(() => {
+    if (
+      currentStep === 'review' &&
+      uploadResponse?.job_id &&
+      extractionStatus?.result &&
+      lastAgentJobId.current !== uploadResponse.job_id
+    ) {
+      void fetchIntakeAgent();
+    }
+  }, [currentStep, uploadResponse?.job_id, extractionStatus?.result, fetchIntakeAgent]);
+
+  const handleApprove = (
+    contractId: number,
+    partyIds: number[],
+    approvalMessage: string
+  ) => {
+    alert(
+      `✅ Success!\n\n${approvalMessage}\n\n` +
+        `Contract ID: ${contractId}\n` +
+        `Parties: ${partyIds.length > 0 ? partyIds.join(', ') : 'None'}`
+    );
+    navigate(`/contracts/${contractId}`);
+  };
+
+  return (
+    <div className="upload-page">
+      <div className="page-header">
+        <h1>Upload Contract Document</h1>
+      </div>
+
+      {/* Progress Steps */}
+      <div className="workflow-steps">
+        <div className={`step ${currentStep === 'upload' ? 'active' : ''} ${
+          currentStep !== 'upload' ? 'completed' : ''
+        }`}>
+          <div className="step-number">1</div>
+          <div className="step-label">Upload</div>
+        </div>
+        <div className="step-divider"></div>
+        <div className={`step ${currentStep === 'processing' ? 'active' : ''} ${
+          currentStep === 'review' ? 'completed' : ''
+        }`}>
+          <div className="step-number">2</div>
+          <div className="step-label">Processing</div>
+        </div>
+        <div className="step-divider"></div>
+        <div className={`step ${currentStep === 'review' ? 'active' : ''}`}>
+          <div className="step-number">3</div>
+          <div className="step-label">Review</div>
+        </div>
+      </div>
+
+      {/* Step Content */}
+      <div className="step-content">
+        {currentStep === 'upload' && (
+          <>
+            <FileUpload
+              onUploadSuccess={handleUploadSuccess}
+              onUploadError={(error) => alert(error)}
+            />
+            {isOfflineMode && (
+              <>
+                <p className="sample-documents__label" style={{ marginTop: '2.5rem', textAlign: 'center' }}>Or use a sample extraction</p>
+              <div className="mock-upload">
+                <p className="mock-upload__description">
+                  Seed a fully-populated mock extraction to exercise
+                  the AI agent flows while still using your OpenAI API key.
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleSeedMock}
+                  disabled={isSeedingMock}
+                >
+                  {isSeedingMock ? 'Seeding Mock Extraction...' : 'Use Sample Extraction'}
+                </button>
+              </div>
+              </>
+            )}
+          </>
+        )}
+
+        {currentStep === 'processing' && uploadResponse && (
+          <ExtractionStatus
+            jobId={uploadResponse.job_id}
+            onComplete={handleExtractionComplete}
+            onError={(error) => {
+              alert(error);
+              setCurrentStep('upload');
+            }}
+          />
+        )}
+
+        {currentStep === 'review' && extractionStatus?.result && (
+          <ReviewForm
+            extractionResult={extractionStatus.result}
+            documentSource={resolveDocumentSource(uploadResponse, isMockJob, extractionStatus)}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            onCancel={handleCancel}
+            agentAnalysis={intakeAgent}
+            agentLoading={isIntakeLoading}
+            agentError={intakeError}
+            onRefreshAgent={fetchIntakeAgent}
+          />
+        )}
+      </div>
+    </div>
+  );
 };

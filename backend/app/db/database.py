@@ -25,9 +25,6 @@ if database_url.startswith("postgresql://") and "+psycopg" not in database_url:
 engine = create_engine(
     database_url,
     pool_pre_ping=True,  # Enable connection health checks
-    pool_size=5,
-    max_overflow=5,
-    pool_timeout=10,
     echo=settings.DEBUG,  # Log SQL queries in debug mode
 )
 

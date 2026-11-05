@@ -5,13 +5,13 @@ FastAPI backend for the re-ink reinsurance contract management system.
 ## Features
 
 - **Document Processing**: Upload and process PDF/DOCX contract documents
-- **AI Extraction**: Durable n8n extraction with validated provider-independent results
+- **AI Extraction**: Integration with LandingAI's Agentic Document Extraction API
 - **Contract Management**: Full CRUD operations for reinsurance contracts
 - **Party Management**: Manage parties (cedants, reinsurers, brokers)
 - **Review Workflow**: Review and approve AI-extracted data before creation
-- **Source Grounding**: Return available real source text/page/box evidence; absent evidence remains explicit
+- **Source Grounding**: Return page, bounding box, and source text evidence for extracted fields
 - **WorkOS Auth & Tenancy**: Validate AuthKit access tokens and scope resource queries to the caller's organization
-- **Capabilities**: Guided intake and automated review are disabled (503)
+- **Agents**: LangChain/LangGraph guided intake and automated contract review
 
 ## Setup
 
@@ -21,7 +21,7 @@ FastAPI backend for the re-ink reinsurance contract management system.
 - Python 3.13+ (uv can install this for you)
 - PostgreSQL 12+
 - WorkOS AuthKit client ID
-- Private R2 storage and configured n8n/dispatcher service credentials; see [storage/access](../docs/integration/storage-access.md)
+- LandingAI API key, either in `backend/.env` or supplied by users in the Upload UI
 
 ### Installation
 
@@ -82,6 +82,7 @@ backend/
 ├── app/
 │   ├── api/              # API endpoints
 │   │   └── endpoints/    # Route handlers
+│   ├── agents/           # LangChain/LangGraph agent implementations
 │   ├── core/             # Core configuration
 │   ├── db/               # Database setup
 │   ├── models/           # SQLAlchemy models
@@ -97,15 +98,16 @@ backend/
 
 ## API Endpoints
 
-Browser resource endpoints require a WorkOS Bearer token; machine workflow endpoints use separate scoped service authentication (see the integration contract). `/api/system/config` exposes public booleans. The `/api/onboarding/provision-organization` endpoint authenticates a signed-in user before they have an organization so it can provision one.
+All `/api/*` resource endpoints require a WorkOS Bearer token, except `/api/onboarding/provision-organization`, which authenticates a signed-in user before they have an organization so it can provision one.
 
 ### Documents
-- `POST /api/documents/upload` - Persist an original and queue a durable workflow attempt
+- `POST /api/documents/upload` - Upload a document and start extraction in the background
 - `GET /api/documents/status/{job_id}` - Get extraction status
 - `GET /api/documents/results/{job_id}` - Get extraction results with field source evidence
 - `GET /api/documents/file/{job_id}` - Stream the original uploaded document for preview
-- `POST /api/documents/{job_id}/retry` - Permission-gated retry for eligible failed/timed-out workflow jobs
 - `DELETE /api/documents/{job_id}` - Delete a document
+- `POST /api/documents/mock-job` - Seed a mock extraction job for local testing without LandingAI
+- `GET /api/documents/test-mock-data` - Return static mock extraction data for frontend checks
 
 ### Contracts
 - `GET /api/contracts/` - List all contracts, with `status`, `contract_type`, `skip`, and `limit` filters
@@ -131,8 +133,8 @@ Browser resource endpoints require a WorkOS Bearer token; machine workflow endpo
 - `POST /api/review/reject/{job_id}` - Reject extraction
 
 ### Agents
-- `POST /api/agents/intake` - Disabled (503), upload permission still required
-- `POST /api/agents/review` - Disabled (503), contract-read permission still required
+- `POST /api/agents/intake` - Run the guided intake agent for an extraction job
+- `POST /api/agents/review` - Generate an automated review for a contract
 
 ### System, Widgets, and Onboarding
 - `GET /api/system/config` - Return runtime flags needed by the frontend
@@ -185,11 +187,23 @@ Key environment variables:
 - `DATABASE_URL` - PostgreSQL connection string
 - `WORKOS_CLIENT_ID` - WorkOS client ID used to derive token issuer and JWKS URL
 - `WORKOS_API_KEY` - Required for server-side WorkOS calls such as User Profile widget tokens and organization provisioning; not required for access-token validation
+- `LANDINGAI_API_KEY` - Optional server-side LandingAI API key; users can also supply their own key in the Upload UI
+- `LANDINGAI_PARSE_URL` - LandingAI Parse API endpoint (default: https://api.va.landing.ai/v1/ade/parse)
+- `LANDINGAI_EXTRACT_URL` - LandingAI Extract API endpoint (default: https://api.va.landing.ai/v1/ade/extract)
+- `LANDINGAI_PARSE_MODEL` - Parse model version (default: dpt-2-latest)
+- `LANDINGAI_EXTRACT_MODEL` - Extract model version (default: extract-latest)
 - `DEBUG` - Enable debug mode (default: False)
 - `LOG_LEVEL` - Logging level (default: INFO)
 - `MAX_UPLOAD_SIZE` - Maximum file upload size (bytes)
-- `UPLOAD_DIR` - Retired local upload directory; workflow originals use private R2
+- `UPLOAD_DIR` - Directory for storing uploaded files
 - `ALLOWED_EXTENSIONS` - Upload extensions accepted by the backend (default: `.pdf`, `.docx`)
+- `LLM_PROVIDER` - Agent LLM backend, either `openai` or `ollama`
+- `OPENAI_API_KEY` - OpenAI key required when `LLM_PROVIDER=openai`
+- `AGENT_MODEL` - OpenAI model for agents (default: `gpt-4o`)
+- `AGENT_TEMPERATURE` - Agent model temperature (default: `0.1`)
+- `AGENT_OFFLINE_MODE` - Skip LLM calls and return deterministic local agent output
+- `OLLAMA_BASE_URL` - Ollama server URL when using the Ollama provider
+- `OLLAMA_MODEL` - Ollama model name (default: `llama3.1`)
 
 ### Troubleshooting
 
@@ -203,13 +217,3 @@ env | grep DEBUG
 unset DEBUG
 uv run fastapi dev
 ```
-
-## Workflow integration
-
-Use [.env.example](.env.example) for non-secret configuration names and inject values securely. `WORKFLOW_UPLOADS_ENABLED` defaults false; workflow extraction and retry capabilities require that flag and complete integration configuration. `/api/system/config` exposes only booleans, never URLs, customer IDs, tokens, storage credentials, or a provider selector. Model/provider SDKs and credentials are not needed in re-ink.
-
-New extraction history contains workflow jobs only. States are `queued`, `processing`, `completed`, `failed`, `timed_out`; browser polling stops at terminal states. `POST /api/documents/{job_id}/retry` requires `document:upload` and eligible failed/timed-out work; it returns a queued upload response. No automatic fresh provider attempt, fixture fallback, or legacy adapter exists.
-
-Review accepts useful partial results. Required identity/dates/currency and every supplied party role need explicit reviewer values before approval; missing currency/roles are not inferred. Available PDF citations remain highlightable. DOCX uses text evidence plus original download, without inline converted pages. Approval creates local records, not Core publication or a per-field verification audit.
-
-Follow the [cutover runbook](../docs/integration/cutover.md), [contract](../docs/integration/contract.md), and [lifecycle](../docs/integration/n8n-reliability.md#application-lifecycle-and-workers). Run `TEST_DATABASE_URL=... uv run pytest -q -p no:logging` on disposable PostgreSQL and frontend `npm run build` / `npm run lint`. Live provider/deployment gates are separate from deterministic tests.
