@@ -4,152 +4,96 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**re-ink** is a full-stack web application for automated reinsurance contract and party management. Users upload PDF/DOCX reinsurance documents, which are processed by LandingAI's Agentic Document Extraction API. Extracted data is reviewed and approved to create structured Contract and Party records. A LangChain/LangGraph agent layer provides guided intake and automated contract review.
+**re-ink** is a multi-tenant B2B web app for reinsurance contract and party management. Users upload PDF/DOCX reinsurance documents. LandingAI's Agentic Document Extraction extracts the data, which is reviewed (with per-field source grounding) and approved into structured Contract and Party records. A LangChain/LangGraph agent layer adds guided intake and automated contract review.
 
-**Stack**: FastAPI + SQLAlchemy + PostgreSQL + LandingAI (backend) · React 18 + TypeScript + Vite + React Query (frontend)
+**Stack**: FastAPI + SQLAlchemy + PostgreSQL (Neon) + Alembic · React 18 + TypeScript + Vite + React Query · WorkOS (AuthKit, organizations, RBAC) · Cloudflare (Worker + Queues for extraction, R2 for documents, Pages for the frontend) · LandingAI ADE
 
 ## Development Commands
 
-### Quickstart (Makefile)
-
 ```bash
-make setup          # Install backend + frontend dependencies (also runs sync-version)
-make dev            # Launch both dev servers concurrently (Ctrl+C stops both)
-make backend-dev    # Backend only (fastapi dev, auto-reload, port 8000)
-make frontend-dev   # Frontend only (vite --host, port 3000)
-make sync-version   # Copy root VERSION → backend/VERSION (needed for local dev)
-make bump-version V=1.2.3  # Bump version across VERSION, backend/VERSION, package.json
+make setup          # Install backend + frontend deps (runs sync-version)
+make dev            # Both dev servers (backend :8000, frontend :3000)
+make bump-version V=1.2.3  # VERSION, backend/VERSION, frontend/package.json
 ```
 
-### Backend (from `backend/`)
-
-Dependencies are managed with [uv](https://docs.astral.sh/uv/) (`pyproject.toml` + `uv.lock`); requires Python 3.13+. `uv run` executes commands inside the project venv (`.venv`), so no manual activation is needed.
+Backend (from `backend/`, Python 3.13+, managed by uv):
 
 ```bash
-uv sync                                              # Install/sync deps into .venv (dev group included by default)
-uv run alembic upgrade head                          # Apply migrations (fresh DB) or advance to latest
-uv run alembic stamp 0001_baseline                   # ONE-TIME: stamp existing DBs that predate Alembic
-uv run alembic revision --autogenerate -m "description" # New migration
-uv run pytest                                        # Run tests
-uv run uvicorn app.main:app --reload                 # Dev server
+uv sync
+uv run alembic upgrade head
+uv run alembic revision --autogenerate -m "description"
+uv run pytest
 ```
 
-> **Note on schema management**: `Base.metadata.create_all()` is no longer called at startup — Alembic is the single source of schema truth. For a fresh database run `alembic upgrade head`. For an existing database that was previously created by `create_all()` (including production), run `alembic stamp 0001_baseline` once before running `alembic upgrade head`, so Alembic records the baseline without re-running DDL.
+Frontend (from `frontend/`): `npm run dev`, `npm run build`, `npm run lint`. There is no frontend test runner; verify with `npm run build` and document manual checks in PRs.
 
-### Frontend (from `frontend/`)
+Worker (repo root): `node --test workflows/cloudflare/*.test.mjs`. Pass the file glob, not the directory.
 
-```bash
-npm run dev     # Dev server
-npm run build   # Production build
-npm run lint    # ESLint check (required before PR)
-```
+API docs are at `http://localhost:8000/docs`; read the endpoint list there rather than from this file.
 
 ## Architecture
 
-### Backend
+### Tenancy and auth
 
-Layered FastAPI service under `backend/app/`:
+- **Tenant = WorkOS organization.** The SPA uses AuthKit (Bearer access token held in memory). `get_current_user` validates the WorkOS JWT and requires an `org_id`. `get_authenticated_user` allows orgless users, and is used only by onboarding.
+- **RBAC.** Endpoints gate on WorkOS permission slugs via `require_permission("<resource>:<action>")`, e.g. `document:upload`, `contract:write`, `member:manage`, `sso:manage`, `organization:close`. A new permission must also be added to the WorkOS dashboard roles.
+- **Isolation is Postgres RLS.** The app connects as the restricted, non-BYPASSRLS role `reink_app`. `get_tenant_db` binds `app.current_org` on every transaction, and an unbound query sees zero rows. Tenant tables carry `org_id NOT NULL` and RLS policies. Use `get_tenant_db` for tenant data; `get_db` is for non-tenant tables.
+- **Organization lifecycle.** Every org-scoped router is registered with `_auth = [get_current_user, require_active_organization]` in `api/__init__.py`. A closing org gets 423 `ORGANIZATION_CLOSING` everywhere except the routes in `EXEMPT_ROUTES` (`core/organization_lifecycle.py`). A route-enumeration test fails if a new org-scoped route skips this.
+- **Onboarding.** `POST /api/onboarding/provision-organization` gives a zero-org user a dedicated org. It is crash-safe through a durable `provisioning_intents` row plus a WorkOS idempotency key, and assigns free-trial eligibility once.
 
-- **`api/endpoints/`**: Thin route handlers per resource — `documents.py`, `contracts.py`, `parties.py`, `review.py`, `agents.py`, `system.py`
-- **`services/`**: Business logic — `landingai_service.py` (ADE API calls + source-grounding reference resolution), `document_service.py` (upload/validation), `agent_service.py` (orchestrates the agents below), `party_matching.py` (rapidfuzz name normalization/splitting/scoring)
-- **`agents/`**: LangChain/LangGraph agent implementations — `guided_intake.py` (`GuidedContractIntakeAgent`), `contract_review.py` (`AutomatedContractReviewAgent`), `utils.py`. Invoked via `agent_service.py`
-- **`models/`**: SQLAlchemy ORM models; `ExtractionJob` persists extraction job state (status, parsed results) in PostgreSQL; `contract_parties` association table links Contracts ↔ Parties with a `role` field (e.g. "cedant", "reinsurer")
-- **`schemas/`**: Pydantic schemas for request/response validation — includes `extraction_schema.py` (the LandingAI Extract field schema) and `FieldSource`/`FieldSources` in `document.py` (per-field source grounding: page + normalized bounding box + verbatim chunk text)
-- **`core/config.py`**: All settings via `pydantic-settings`
+### Extraction pipeline
 
-### Frontend
+With `CLOUDFLARE_TRIAL_ENABLED` (production), uploads never call LandingAI from the API process:
 
-Vite + React under `frontend/src/`:
+1. `POST /api/documents/upload` stores the original in R2 under the org's tenant prefix, creates an `ExtractionJob` + `ExtractionAttempt` + outbox row, and reserves quota.
+2. The Worker cron calls `/api/maintenance/cloudflare-dispatch`, which leases outbox rows onto the Cloudflare queue.
+3. The Worker (`workflows/cloudflare/worker.mjs`) consumes each message. It calls the machine routes in `api/endpoints/cloudflare.py` (protocol, claim, document, credential, provider-start, checkpoint, deliver) and runs LandingAI.
+4. The SPA polls `GET /api/documents/status/{job_id}`, then reviews `results` with `field_sources` overlaid on the PDF by `DocumentPreview`.
 
-- **`pages/`**: `HomePage.tsx` (landing page at `/`), `Dashboard.tsx`, `UploadPage.tsx` (full upload→extract→review flow), `ContractsPage.tsx` + `ContractDetailPage.tsx`, `PartiesPage.tsx` + `PartyDetailPage.tsx`. `App.tsx` routes `/` to `HomePage`; all other routes render inside `Layout`
-- **`components/`**: `FileUpload.tsx`, `ExtractionStatus.tsx` (polls job status), `ReviewForm.tsx`, `Layout.tsx`, `DocumentPreview.tsx` (renders the source PDF to a `<canvas>` via pdf.js and overlays source-grounding bounding boxes), `SecondarySidebar.tsx` (contextual second sidebar portaled into a `Layout` slot, used by the review/source-grounding panel)
-- **`services/api.ts`**: Axios client — single source of truth for all backend calls
-- **`types/`**: TypeScript types mirroring backend Pydantic schemas
-- Use `@/*` path alias for imports instead of relative paths
+Without the flag, the legacy in-process path calls `landingai_service` directly.
 
-### Key Workflow
+The cron also calls `/api/maintenance/expiry`, `/cleanup` and `/purge`. Each maintenance and machine route has its own bearer token and its own least-privilege DB role (`reink_cf_machine`, `_dispatch`, `_expiry`, `_cleanup`, `_purge`).
 
-1. `POST /api/documents/upload` — saves file, starts LandingAI extraction job
-2. `GET /api/documents/status/{job_id}` — polled by `ExtractionStatus` until `completed`/`failed`
-3. `GET /api/documents/results/{job_id}` — returns parsed extraction data, including per-field `field_sources` (page + bounding box) for source grounding; `GET /api/documents/file/{job_id}` serves the original PDF that `DocumentPreview` overlays boxes onto
-4. `POST /api/parties/match` — fuzzy-matches extracted party names against existing Party records so reviewers can reuse rather than duplicate
-5. `POST /api/review/approve` — creates Contract + Party records from reviewed data
-6. `POST /api/agents/intake` / `POST /api/agents/review` — optional LangChain agent passes (requires `LLM_PROVIDER` config)
+### Quotas and the free trial
 
-## Environment Variables
+- **Funding.** Each extraction is either `customer` (the org stored its own LandingAI key, AES-GCM encrypted in `provider_credentials`) or `trial` (the platform key).
+- **Trial eligibility.** It is decided at provisioning and stored on `extraction_quota_org.trial_eligible`, which fails closed. The creating user (HMAC via `TRIAL_IDENTITY_HASH_KEY`) and, for non-webmail emails, the domain may each claim one trial (`trial_users`, `trial_domains`). Never change or lose that key.
+- **Caps.** Trial: 5 free per org, plus 50/month successes and 200/month attempts. Customer: `EXTRACTION_CUSTOMER_MONTHLY_LIMIT` and `EXTRACTION_CUSTOMER_MONTHLY_ATTEMPT_LIMIT`. The per-minute limit and the global trial caps always apply. Setting `EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT=0` stops free extractions only. `EXTRACTION_UNCAPPED_ORGANIZATION_IDS` (the owner's test org) skips the monthly caps for customer funding only.
 
-### Backend (`backend/.env`)
+### Account lifecycle
 
-```env
-DATABASE_URL=postgresql://user:password@localhost:5432/reink_db
-LANDINGAI_API_KEY=your_key
-LANDINGAI_PARSE_URL=https://api.va.landing.ai/v1/ade/parse
-LANDINGAI_EXTRACT_URL=https://api.va.landing.ai/v1/ade/extract
-LANDINGAI_PARSE_MODEL=dpt-2-latest
-LANDINGAI_EXTRACT_MODEL=extract-latest
-UPLOAD_DIR=./uploads
-MAX_UPLOAD_SIZE=52428800
-ALLOWED_ORIGINS=["http://localhost:3000","http://localhost:5173"]
-LLM_PROVIDER=openai               # "openai" or "ollama"
-OPENAI_API_KEY=your_openai_key    # Only needed when LLM_PROVIDER=openai
-AGENT_MODEL=gpt-4o-mini           # Model name for OpenAI provider
-OLLAMA_BASE_URL=http://localhost:11434  # Only needed when LLM_PROVIDER=ollama
-OLLAMA_MODEL=llama3.1             # Model name for Ollama provider
-AGENT_OFFLINE_MODE=false          # Set true to skip LLM calls entirely
-```
+- **Leaving.** `POST /api/members/me/leave` removes the caller's membership. If it is their only one, it deletes the WorkOS user instead. The last admin gets 409.
+- **Closing.** `POST /api/organization/close` requires `organization:close`. It cancels active attempts, settles their quota, and starts a 30-day grace period during which `cancel-closure` restores access.
+- **Purge.** `purge_worker.py` runs after the grace period. It deletes R2 objects (verified empty), then tenant rows, then the WorkOS org, then marks the org `purged`. Quota and trial rows are retained.
 
-### Frontend (`frontend/.env`)
+### Code layout
 
-```env
-VITE_API_BASE_URL=http://localhost:8000/api
-```
+- **Backend (`backend/app/`).**
+  - `api/endpoints/` holds thin handlers.
+  - `services/` holds business logic: `workflow_service.py` (attempts, outbox, settlement), `extraction_quota.py`, `trial_eligibility.py`, `storage_service.py` / `private_document_service.py` (R2), `landingai_service.py`, `party_matching.py`, `agent_service.py`.
+  - `agents/` holds the LangChain agents.
+  - `core/` holds config, auth, tenancy, lifecycle and Cloudflare runtime factories.
+  - `*_worker.py` holds the maintenance job logic.
+- **Frontend (`frontend/src/`).** `pages/` and `components/`, plus `AuthGuards.tsx` and `RequirePermission.tsx` for auth. `services/api.ts` is the single Axios client, and `types/` mirrors the backend schemas. Import with the `@/*` alias.
+- **Tooling.** `deploy/` holds one-off operator scripts (role provisioning in `deploy/storage/`, the trial backfill, the orphan-org report). `docs/` holds runbooks (`trial-production-setup.md`, `trial-eligibility.md`, `organization-closure.md`) and the user guide.
 
-## Sample Documents
+## Conventions and gotchas
 
-Two sample PDFs are bundled with the frontend at `frontend/public/samples/` and are selectable directly in the Upload page UI — no setup needed.
-
-## Version Management
-
-The root `VERSION` file is the single source of truth for the app version.
-
-- **Frontend**: `vite.config.ts` reads `../VERSION` at build time and injects it as `__APP_VERSION__` (displayed in the sidebar)
-- **Backend**: `config.py` reads `backend/VERSION`; this file is generated by the CI deploy workflow (`cp VERSION backend/VERSION`) and excluded from git
-- **Local dev**: run `make sync-version` once after cloning (or `make setup` which includes it)
-- **Bumping**: `make bump-version V=x.y.z` updates `VERSION`, `backend/VERSION`, and `frontend/package.json` atomically
-
-## Testing
-
-```bash
-cd backend && uv run pytest                    # All backend tests
-cd backend && uv run pytest tests/test_mock_agents.py  # Single file
-```
-
-No frontend test runner is bundled. Keep `npm run lint` clean; document manual verification in PRs.
-
-## API Surface
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| POST | `/api/documents/upload` | Upload doc, start extraction |
-| GET | `/api/documents/status/{job_id}` | Poll extraction status |
-| GET | `/api/documents/results/{job_id}` | Fetch extraction results (with `field_sources`) |
-| GET | `/api/documents/file/{job_id}` | Serve original uploaded PDF for preview |
-| DELETE | `/api/documents/{job_id}` | Delete a document / extraction job |
-| GET/POST | `/api/contracts/` | List / create contracts |
-| GET/PUT/DELETE | `/api/contracts/{id}` | Contract detail ops |
-| POST/DELETE | `/api/contracts/{id}/parties/{party_id}` | Link/unlink party |
-| GET/POST | `/api/parties/` | List / create parties |
-| GET/PUT/DELETE | `/api/parties/{id}` | Party detail ops |
-| POST | `/api/parties/match` | Fuzzy-match extracted names to existing parties |
-| GET | `/api/parties/search/by-name` | Name search |
-| POST | `/api/review/approve` | Approve extraction → create records |
-| POST | `/api/review/reject/{job_id}` | Reject extraction |
-| POST | `/api/agents/intake` | Guided intake agent |
-| POST | `/api/agents/review` | Automated contract review agent |
-| GET | `/api/system/config` | Agent config flags for frontend |
-| POST | `/api/widgets/user-profile/token` | Mint a WorkOS User Profile widget token for the current user |
-
-API docs available at `http://localhost:8000/docs` when the backend is running.
+- **Migrations.**
+  - Alembic is the only schema source; nothing calls `create_all()`. Revision ids are at most 32 chars (`00NN_short_name`).
+  - Grant privileges in the migration with a `DO $$ ... IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '<role>') ...` block, least privilege. New service roles come from `deploy/storage/create_service_roles.py`. Neon console-created roles get BYPASSRLS, so create roles with SQL.
+- **New tenant tables** need `org_id`, RLS policies and `reink_app` grants. They must also be classified in `DELETE_TABLES` or `RETAIN_TABLES` in `purge_worker.py`; the purge fails closed on an unclassified `org_id` table.
+- **Settings validation is strict.** With `CLOUDFLARE_ENABLED`, `core/config.py` requires every Cloudflare DB URL and token, all distinct, and refuses to start otherwise. Set new production secrets in FastAPI Cloud **before** merging code that requires them.
+- **Deploys.**
+  - A push to `main` touching `backend/**` runs `alembic upgrade head` (owner URL) and deploys the backend to FastAPI Cloud through CI. Merging is releasing.
+  - The frontend deploys to Cloudflare Pages.
+  - The Worker deploys manually with `npx wrangler deploy --config workflows/cloudflare/wrangler.toml`, and only after its secrets exist; a missing scheduler token stops all maintenance.
+- **Tests.**
+  - Backend tests run against real Postgres (`reink_test`, overridable with `TEST_DATABASE_URL`) as the restricted role.
+  - CI runs in UTC with no `.env`. Also run `PGTZ=UTC uv run pytest`, and set any WorkOS key or token a test needs inside the test.
+  - Use a fresh `TEST_DATABASE_URL` database when switching between branches with different migrations.
+- **Domain spelling.** The party role is spelled "cedant".
+- **Versioning.** The root `VERSION` is the source of truth. CI copies it to `backend/VERSION`; run `make sync-version` locally.
 
 ## Agent skills
 
