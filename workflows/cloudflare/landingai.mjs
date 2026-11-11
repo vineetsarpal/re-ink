@@ -13,7 +13,7 @@ export async function probeLandingAI({ document, filename, apiKey, parseModel, e
   parseForm.append('document', document, filename);
   parseForm.append('model', parseModel);
   const parsedResponse = await fetchImpl(`${API}/parse`, {
-    method: 'POST', headers, body: parseForm, redirect: 'error', signal: AbortSignal.timeout(PARSE_TIMEOUT_MS),
+    method: 'POST', headers, body: parseForm, redirect: 'manual', signal: AbortSignal.timeout(PARSE_TIMEOUT_MS),
   });
   if (parsedResponse.status !== 200) throw new Error('PARSE_FAILED');
   const parsed = await parsedResponse.json();
@@ -27,7 +27,7 @@ export async function probeLandingAI({ document, filename, apiKey, parseModel, e
   extractForm.append('schema', JSON.stringify(schema));
   extractForm.append('model', extractModel);
   const extractResponse = await fetchImpl(`${API}/extract`, {
-    method: 'POST', headers, body: extractForm, redirect: 'error', signal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS),
+    method: 'POST', headers, body: extractForm, redirect: 'manual', signal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS),
   });
   if (extractResponse.status !== 200) throw new Error('EXTRACT_FAILED');
   const extracted = await extractResponse.json();

@@ -14,7 +14,7 @@ test('sends document and parse markdown to the two fixed LandingAI endpoints', a
   } });
   assert.equal(result.parsed.markdown, '# fixture');
   assert.deepEqual(requests.map(r => r.url), ['https://api.va.landing.ai/v1/ade/parse', 'https://api.va.landing.ai/v1/ade/extract']);
-  assert.equal(requests[0].init.redirect, 'error');
+  assert.equal(requests[0].init.redirect, 'manual');
   assert.equal(requests[0].init.headers.Authorization, 'Bearer test-secret');
   assert.equal(await requests[1].init.body.get('markdown').text(), '# fixture');
   assert.equal(requests[1].init.body.get('strict'), null);
