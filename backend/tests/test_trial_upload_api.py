@@ -171,11 +171,12 @@ def test_five_free_completions_then_customer_key(as_org, db_session, monkeypatch
             db_session.expire_all()
             attempt_id = db_session.get(ExtractionJob, job_id).selected_attempt_id
             base = f"/api/cloudflare/jobs/{job_id}/attempts/{attempt_id}"
-            claim = client.post(base + "/claim")
+            claim = client.post(base + "/claim", headers={"X-Extraction-Protocol": "2"})
             assert claim.status_code == 200, claim.text
             token = claim.json()["checkpoint_token"]
             headers = {"X-Checkpoint-Token": token}
             assert client.get(base + "/credential", headers=headers).json() == {"api_key": expected_key}
+            assert client.post(base + "/provider-start", headers=headers).status_code == 200
             event = {"schema_version": "1", "job_id": job_id, "attempt_id": attempt_id,
                      "event_id": "terminal", "status": "completed",
                      "result": {"contract_data": {"contract_name": "Synthetic treaty"}, "parties_data": []}}
@@ -206,7 +207,7 @@ def test_five_free_completions_then_customer_key(as_org, db_session, monkeypatch
         db_session.expire_all()
         attempt_id = db_session.get(ExtractionJob, job_id).selected_attempt_id
         base = f"/api/cloudflare/jobs/{job_id}/attempts/{attempt_id}"
-        token = client.post(base + "/claim").json()["checkpoint_token"]
+        token = client.post(base + "/claim", headers={"X-Extraction-Protocol": "2"}).json()["checkpoint_token"]
         event = {"schema_version": "1", "job_id": job_id, "attempt_id": attempt_id,
                  "event_id": "terminal", "status": "failed",
                  "error": {"code": "EXTRACTION_FAILED", "message": "Extraction failed.", "retryable": True}}

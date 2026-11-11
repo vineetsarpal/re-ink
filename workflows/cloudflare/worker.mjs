@@ -1,11 +1,13 @@
 // Disabled by default: no deployment configuration or backend route is enabled.
 // Secrets must be supplied only as Cloudflare Worker secrets, never queue data.
+import { PREPARATION_FAILED, TRIAL_CAPACITY_UNAVAILABLE } from './errors.mjs';
 import schema from './business-schema.json' with { type: 'json' };
 import providerSchema from './provider-schema.json' with { type: 'json' };
 import { consumeBatch, MAX_EVENT } from './queue.mjs';
 import { probeLandingAI } from './landingai.mjs';
 import { parseLanding, normalizeLanding } from './normalizers.mjs';
 
+const EXTRACTION_PROTOCOL_VERSION = '2';
 const MAX_DOCUMENT = 5 * 1024 * 1024;
 const MAX_RESPONSE = 8 * 1024 * 1024;
 // Backend statements are capped at 15s; R2 reads may take longer.
@@ -80,7 +82,19 @@ function services(env, fetchImpl, { sleep = wait } = {}) {
     ...options, redirect: 'manual', signal: AbortSignal.timeout(timeout), headers: { Authorization: `Bearer ${config.token}`, 'X-Dispatch-Capability': dispatch.capability, ...options.headers },
   });
   return {
-    async claim(dispatch) { return readJson(await call(dispatch, 'claim', { method: 'POST' }), 16384); },
+    async claim(dispatch) {
+      let capability;
+      try { capability = await readJson(await call(dispatch, 'protocol'), 16384); }
+      catch {
+        console.error(JSON.stringify({ event: 'extraction_protocol_mismatch', expected: EXTRACTION_PROTOCOL_VERSION }));
+        throw new Error('EXTRACTION_PROTOCOL_MISMATCH');
+      }
+      if (capability.protocol_version !== EXTRACTION_PROTOCOL_VERSION) {
+        console.error(JSON.stringify({ event: 'extraction_protocol_mismatch', expected: EXTRACTION_PROTOCOL_VERSION }));
+        throw new Error('EXTRACTION_PROTOCOL_MISMATCH');
+      }
+      return readJson(await call(dispatch, 'claim', { method: 'POST', headers: { 'X-Extraction-Protocol': EXTRACTION_PROTOCOL_VERSION } }), 16384);
+    },
     async extract(dispatch, checkpointToken) {
       const headers = { 'X-Checkpoint-Token': checkpointToken };
       const extensions = { 'application/pdf': 'pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx' };
@@ -96,8 +110,19 @@ function services(env, fetchImpl, { sleep = wait } = {}) {
           return new Blob([await boundedBytes(document, MAX_DOCUMENT)], { type: mime });
         }, sleep);
       } catch (error) {
-        throw Object.assign(new Error('PREPARATION_FAILED'), { preProvider: true, retryable: transient(error) });
+        throw Object.assign(new Error(PREPARATION_FAILED), { preProvider: true, retryable: transient(error) });
       }
+      let authorization;
+      try {
+        authorization = await readJson(await call(dispatch, 'provider-start', { method: 'POST', headers }), 16384);
+      } catch (error) {
+        if (error.status === 429) {
+          throw Object.assign(new Error(TRIAL_CAPACITY_UNAVAILABLE), { preProvider: true, code: TRIAL_CAPACITY_UNAVAILABLE, retryable: true });
+        }
+        // An ambiguous response may already have consumed a start. Never retry it.
+        throw error;
+      }
+      if (authorization.authorized !== true) throw new Error('PROVIDER_AUTHORIZATION_FAILED');
       // Bound provider JSON before the probe parses it; never log remote bodies.
       const providerFetch = async (url, options) => {
         const response = await fetchImpl(url, options);

@@ -62,8 +62,9 @@ Expired uploads keep tombstones that are revisited for late storage writes
 every 24 hours. Once a successful rescan happens at least 7 days after the
 upload lease deadline, the row is marked `deleted` and never rescanned (rows
 are retained, not removed). Uploads deleted in the request itself are marked
-`deleted` immediately. Failed deletions retry after five minutes without a
-limit, so monitor failing rows. Each scheduler call processes up to
+`deleted` immediately. Failed deletions retry after five minutes, doubling on consecutive failures
+to a 24-hour cap. Success resets the failure counter; persistent failures
+continue daily and need monitoring. Each scheduler call processes up to
 `CLEANUP_BATCH_LIMIT` (default 25) items, alternating fairly between upload
 tombstones and revoked originals, and starts no new item after
 `CLEANUP_TIME_BUDGET_SECONDS` (default 10; the Cloudflare caller aborts at 45s).
@@ -113,3 +114,59 @@ Each `CLOUDFLARE_*_DATABASE_URL` must use its own role and
 `certifi` CA file, because the libpq bundled with `psycopg[binary]` may not
 find the host certificate store (observed on macOS with `sslrootcert=system`).
 An explicit `sslrootcert` in the URL is respected.
+
+### Local follow-ups (2026-11-11)
+
+Migration `0016_cleanup_backoff` adds a consecutive cleanup failure counter and
+replaces `reink_finish_expired_upload` with the same signature and ACL. Existing
+cleanup role grants remain sufficient; provisioning must not be rerun. Its
+downgrade restores the five-minute schedule and removes the counter. Lease,
+fencing, live-reference checks, daily rescans and seven-day retirement remain.
+
+The Cloudflare claim now authorizes preparation only. A separate one-shot
+`provider-start` request counts the trial start after document and credential
+fetches succeed, immediately before the provider probe. Existing machine role
+grants cover this operation. Protocol 2 now rejects mismatched pairs before a
+claim can spend a start. Use the coordinated procedure below; these local
+changes have not been deployed.
+
+Preparation failures settle without spending a global trial start. Failed
+provider calls still count against the global monthly cap of 100. Provider-start
+authorization is never retried: a lost acknowledgment can conservatively spend
+a start without making a provider call. A process crash can still require
+expiry; no exactly-once provider execution guarantee is made.
+
+### Coordinated protocol-2 rollout
+
+These are operator instructions for a separately authorized deployment; this
+follow-up performs local validation only. Do not roll either side independently.
+
+1. **Pause:** block new upload/retry admission at the ingress and pause queue
+   consumption and dispatch scheduling. Keep expiry and cleanup running. Do not
+   use a backend flag change that disables terminal delivery during draining.
+2. **Drain:** wait for every in-flight Worker invocation and backend machine
+   request to finish (allow the full 15-minute consumer wall-clock window).
+   Confirm no active invocations remain. Inspect unresolved attempts and queued
+   messages; let ambiguous attempts expire rather than replaying provider calls.
+3. **Deploy backend + Worker:** with admission, dispatch and consumption still
+   paused, apply 0016 and deploy the matching backend and Worker artifacts.
+   Existing grants suffice; do not rerun provisioning. The backend now requires
+   `X-Extraction-Protocol: 2` on claim and rejects completed checkpoints and
+   settlement without `provider_started`. The Worker first authenticates a GET
+   to the attempt's `/protocol` endpoint and requires `protocol_version: "2"`
+   before sending any claim. An old backend returns 404 there; an old Worker
+   fails the new claim version check with 409. Neither mismatch spends a start
+   or calls LandingAI. Worker logs use `extraction_protocol_mismatch`; backend
+   claim errors contain `EXTRACTION_PROTOCOL_MISMATCH`.
+4. **Verify:** while public admission stays blocked, verify the authenticated
+   protocol probe, missing/wrong-version claim rejection, and unchanged start
+   counters. In an isolated synthetic canary, verify preparation leaves starts
+   unchanged, provider authorization increments once, completion requires that
+   authorization, and capacity denial settles as `TRIAL_CAPACITY_UNAVAILABLE`
+   without a start. Verify status hides retry under quota/rate denial and for
+   non-retryable failures, plus durable checkpoint replay. Stop rollout if any
+   check fails; keep both sides paused while restoring a matching pair.
+5. **Resume:** enable dispatch and queue consumption, observe the canary through
+   checkpoint and settlement, then reopen public admission. Monitor protocol
+   errors, starts, queue age, timeouts and capacity denials. Rollback also requires
+   pause → drain → deploy a matching pair → verify → resume.

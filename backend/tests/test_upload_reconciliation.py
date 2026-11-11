@@ -184,3 +184,31 @@ def test_reconciliation_transactions_set_timeouts(monkeypatch):
         with upload_reconciliation._transaction(sessionmaker(bind=engine)) as db:
             assert db.scalar(text('SHOW statement_timeout')) == '15s'
             assert db.scalar(text('SHOW lock_timeout')) == '5s'
+
+
+def test_failed_tombstones_back_off_and_success_resets_failures(monkeypatch):
+    from app.api.endpoints import cleanup_maintenance
+
+    class UnavailableStorage:
+        def delete(self, key):
+            raise OSError('local synthetic failure')
+
+    with _cleanup_harness(monkeypatch) as (owner, run, intent, objects, org, _):
+        job, key = intent()
+        working_storage = cleanup_maintenance.storage_service
+        monkeypatch.setattr(cleanup_maintenance, 'storage_service', UnavailableStorage())
+        for minutes in (5, 10, 20, 40, 80, 160, 320, 640, 1280, 1440, 1440):
+            assert run() == 1
+            delay = owner.execute("SELECT extract(epoch FROM next_cleanup_at - clock_timestamp()) FROM upload_intents WHERE job_id=%s", (job,)).fetchone()[0]
+            assert minutes * 60 - 5 <= delay <= minutes * 60
+            assert run() == 0
+            assert key in objects
+            owner.execute("UPDATE upload_intents SET next_cleanup_at=clock_timestamp() - interval '1 second' WHERE job_id=%s", (job,))
+        monkeypatch.setattr(cleanup_maintenance, 'storage_service', working_storage)
+        assert run() == 1
+        assert key not in objects
+        owner.execute("UPDATE upload_intents SET next_cleanup_at=clock_timestamp() - interval '1 second' WHERE job_id=%s", (job,))
+        monkeypatch.setattr(cleanup_maintenance, 'storage_service', UnavailableStorage())
+        assert run() == 1
+        delay = owner.execute("SELECT extract(epoch FROM next_cleanup_at - clock_timestamp()) FROM upload_intents WHERE job_id=%s", (job,)).fetchone()[0]
+        assert 295 <= delay <= 300

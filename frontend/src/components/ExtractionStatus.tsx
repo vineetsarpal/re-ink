@@ -1,3 +1,4 @@
+import { PREPARATION_FAILED, TRIAL_CAPACITY_UNAVAILABLE } from '@/types/extractionErrors';
 /**
  * ExtractionStatus component for displaying document extraction progress.
  * Polls the backend for status updates and displays results when complete.
@@ -88,6 +89,12 @@ export const ExtractionStatus: React.FC<ExtractionStatusProps> = ({
         return 'Extraction completed successfully!';
       case 'failed':
       case 'timed_out':
+        if (status.error_code === TRIAL_CAPACITY_UNAVAILABLE) {
+          return 'Free extractions are temporarily unavailable. Add a LandingAI key or try again later.';
+        }
+        if (status.error_code === PREPARATION_FAILED) {
+          return 'We could not prepare your document for extraction. Please try again later.';
+        }
         return status.message || 'Extraction failed';
       case 'processing':
         return 'Processing document...';
@@ -105,7 +112,7 @@ export const ExtractionStatus: React.FC<ExtractionStatusProps> = ({
         <h3>{getStatusMessage()}</h3>
       </div>
 
-      {allowRetry && (status?.status === 'failed' || status?.status === 'timed_out') && (
+      {allowRetry && status?.can_retry === true && (
         <div>
           {retryError && <p role="alert">{retryError}</p>}
           <button type="button" className="btn btn-primary" disabled={retrying} onClick={async () => {

@@ -17,6 +17,7 @@ def test_five_free_attempts_are_reserved_and_only_successes_count(db_session):
     with pytest.raises(HTTPException) as error:
         reserve_extraction(db_session, org, "sixth", has_customer_key=False, global_trial_limit=100000, at=now)
     assert error.value.status_code == 429
+    start_provider_call(db_session, org, "attempt-0", global_trial_call_limit=100, at=now)
     settle_extraction(db_session, org, "attempt-0", success=True, at=now)
     settle_extraction(db_session, org, "attempt-1", success=False, at=now)
     usage = quota_usage(db_session, org, at=now)

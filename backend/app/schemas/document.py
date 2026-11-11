@@ -57,6 +57,8 @@ class DocumentExtractionStatus(BaseModel):
     message: Optional[str] = None
     result: Optional[ExtractionResult] = None
     created_at: datetime
+    error_code: Optional[str] = None
+    can_retry: bool = False
 
 
 class ReviewData(BaseModel):

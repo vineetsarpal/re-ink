@@ -219,3 +219,28 @@ def as_org(db_session):
     yield _act_as
     app.dependency_overrides.pop(get_current_user, None)
     app.dependency_overrides.pop(get_tenant_db, None)
+
+
+@pytest.fixture
+def preserve_global_quota(restricted_engine):
+    """Restore global counters after tests that commit on independent connections."""
+    from sqlalchemy.orm import Session
+    from app.models.extraction_quota import GlobalQuota
+
+    with Session(restricted_engine) as db:
+        row = db.get(GlobalQuota, 1)
+        snapshot = ({name: getattr(row, name) for name in
+                     ("month", "trial_successes", "trial_pending", "trial_starts")}
+                    if row else None)
+    try:
+        yield snapshot
+    finally:
+        with Session(restricted_engine) as db:
+            row = db.get(GlobalQuota, 1)
+            if snapshot is None:
+                if row:
+                    db.delete(row)
+            else:
+                for name, value in snapshot.items():
+                    setattr(row, name, value)
+            db.commit()

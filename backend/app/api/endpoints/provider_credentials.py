@@ -13,18 +13,13 @@ from app.core.config import settings
 from app.core.tenancy import get_tenant_db
 from app.models.provider_credential import ProviderCredential
 from app.models.provider_acknowledgment import LANDINGAI_NOTICE_VERSION, ProviderAcknowledgment
-from app.services.provider_credentials import CredentialEncryptionError, encrypt_credential
+from app.services.provider_credentials import CredentialEncryptionError, encrypt_credential, credentials_available
 
 router = APIRouter()
 _PROVIDER = "landingai"
 _MAX_BODY = 8192
 _MAX_KEY = 4096
 _VALIDATION_URL = "https://api.va.landing.ai/v1/ade/parse/jobs"
-
-
-def credentials_available(user: CurrentUser) -> bool:
-    return bool(settings.CLOUDFLARE_TRIAL_ENABLED and user.org_id
-                and user.org_id in settings.TRIAL_ALLOWED_ORGANIZATION_IDS)
 
 
 def require_credentials_available(user: CurrentUser = Depends(get_current_user)) -> None:

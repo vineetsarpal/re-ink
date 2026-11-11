@@ -15,7 +15,7 @@ from app.core.config import settings, _decoded_secret
 from app.core.cloudflare_runtime import machine_factory, require_enabled
 from app.schemas.workflow import WorkflowPayloadError, parse_workflow_event
 from app.models.cloudflare_execution import CloudflareExecution
-from app.services.cloudflare_coordinator import claim_provider_call, checkpoint_terminal_event, authorize_provider_access
+from app.services.cloudflare_coordinator import claim_preparation, checkpoint_terminal_event, authorize_provider_access, authorize_provider_start
 from app.services.workflow_service import get_attempt_credential, ingest_event
 from app.services.workflow_service import _lock
 from app.services.private_document_service import private_document_service as document_service
@@ -30,6 +30,8 @@ async def bounded_body(request):
         if len(body) > MAX_CALLBACK_BYTES:
             raise HTTPException(413, "Request exceeds 5 MiB")
     return bytes(body)
+
+EXTRACTION_PROTOCOL_VERSION = "2"
 
 router = APIRouter(prefix="/cloudflare", tags=["cloudflare-machine"])
 
@@ -99,9 +101,20 @@ def _authorized_provider_access(db: Session, job_id: str, attempt_id: str, token
     return digest
 
 
+@router.get("/jobs/{job_id}/attempts/{attempt_id}/protocol")
+def protocol(response: Response, org_id: str = Depends(machine_org)):
+    """Authenticated, read-only compatibility probe; never claims an attempt."""
+    response.headers["Cache-Control"] = "no-store"
+    return {"protocol_version": EXTRACTION_PROTOCOL_VERSION}
+
+
 @router.post("/jobs/{job_id}/attempts/{attempt_id}/claim")
-def claim(job_id: str, attempt_id: str, response: Response, db: Session = Depends(machine_db)):
-    result = claim_provider_call(db, job_id, attempt_id)
+def claim(job_id: str, attempt_id: str, response: Response,
+          protocol_version: str | None = Header(default=None, alias="X-Extraction-Protocol"),
+          db: Session = Depends(machine_db)):
+    if protocol_version != EXTRACTION_PROTOCOL_VERSION:
+        raise HTTPException(409, "EXTRACTION_PROTOCOL_MISMATCH: expected protocol 2")
+    result = claim_preparation(db, job_id, attempt_id)
     db.commit()
     response.headers["Cache-Control"] = "no-store"
     return result
@@ -176,3 +189,17 @@ def deliver(job_id: str, attempt_id: str, response: Response, db: Session = Depe
         raise HTTPException(result["rejection"], result["detail"])
     response.headers["Cache-Control"] = "no-store"
     return result
+
+
+@router.post("/jobs/{job_id}/attempts/{attempt_id}/provider-start")
+def provider_start(job_id: str, attempt_id: str, response: Response,
+                   checkpoint_token: str | None = Header(default=None, alias="X-Checkpoint-Token"),
+                   db: Session = Depends(machine_db)):
+    if not checkpoint_token or len(checkpoint_token) > 128:
+        raise HTTPException(401, "Invalid checkpoint credential")
+    authorized = authorize_provider_start(db, job_id, attempt_id, checkpoint_token)
+    db.commit()
+    if not authorized:
+        raise HTTPException(409, "Attempt is no longer active")
+    response.headers["Cache-Control"] = "no-store"
+    return {"authorized": True}

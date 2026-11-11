@@ -6,6 +6,7 @@ transition, including timeout and deletion, must settle it. This module does not
 connect itself to workflow dispatch; uploads remain gated until integration.
 """
 from dataclasses import dataclass
+from types import SimpleNamespace
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -82,14 +83,34 @@ def _check_limits(global_quota, org, funding, *, global_trial_limit, global_tria
             raise HTTPException(429, "Free extractions temporarily unavailable; add a LandingAI key")
 
 
-def precheck_extraction(db, org_id, *, has_customer_key, global_trial_limit, global_trial_call_limit=None, monthly_limit=50, free_limit=5, attempt_limit=200, per_minute_limit=10, at=None):
+def precheck_extraction(db, org_id, *, has_customer_key, global_trial_limit, global_trial_call_limit=None, monthly_limit=50, free_limit=5, attempt_limit=200, per_minute_limit=10, at=None, read_only=False):
     """Reject before storing an upload; rejections consume the per-minute limit.
 
     Callers must commit after a 429 so the rejection is counted. Admission is
-    still decided by reserve_extraction.
+    still decided by reserve_extraction. read_only=True checks current snapshots
+    without locks, inserts, resets, or counter increments.
     """
     _validate("precheck", global_trial_limit, global_trial_call_limit, monthly_limit, free_limit, attempt_limit, per_minute_limit)
     timestamp = at or datetime.now(timezone.utc)
+    if read_only:
+        month = _month(timestamp)
+        global_row = db.get(GlobalQuota, 1)
+        org_row = db.get(OrganizationQuota, org_id)
+        month = max(month, global_row.month if global_row else month, org_row.month if org_row else month)
+        global_quota = SimpleNamespace(**{
+            name: getattr(global_row, name) if global_row and (name == "trial_pending" or global_row.month >= month) else 0
+            for name in ("trial_successes", "trial_pending", "trial_starts")})
+        org = SimpleNamespace(**{
+            name: getattr(org_row, name) if org_row and (name in {"pending", "free_pending", "free_successes"} or org_row.month >= month) else 0
+            for name in ("monthly_successes", "monthly_attempts", "pending", "free_successes", "free_pending")})
+        rate = db.get(ExtractionRate, org_id)
+        attempts = rate.attempts if rate and rate.window_start >= timestamp.astimezone(timezone.utc).replace(second=0, microsecond=0) else 0
+        if attempts >= per_minute_limit:
+            raise HTTPException(429, "Too many extraction attempts; try again shortly")
+        _check_limits(global_quota, org, "customer" if has_customer_key else "trial",
+                      global_trial_limit=global_trial_limit, global_trial_call_limit=global_trial_call_limit,
+                      monthly_limit=monthly_limit, free_limit=free_limit, attempt_limit=attempt_limit)
+        return
     global_quota, org = _locked_accounts(db, org_id, _month(timestamp))
     rate = _locked_rate(db, org_id, timestamp, per_minute_limit)
     try:
@@ -136,6 +157,8 @@ def settle_extraction(db, org_id, attempt_id, *, success, at=None):
     reservation = db.get(QuotaReservation, (org_id, attempt_id), options=[load_only(QuotaReservation.org_id, QuotaReservation.attempt_id, QuotaReservation.status, QuotaReservation.funding)])
     if not reservation:
         raise HTTPException(404, "Extraction reservation not found")
+    if success and not reservation.provider_started:
+        raise HTTPException(409, "Completion requires a counted provider start")
     status = "succeeded" if success else "failed"
     if reservation.status != "pending":
         if reservation.status != status:
