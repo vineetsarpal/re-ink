@@ -1,0 +1,26 @@
+# Review-only template. Not production-ready; see README before enabling triggers.
+name = "reink-extraction-example"
+main = "worker.mjs"
+compatibility_date = "2025-07-09"
+
+[vars]
+REINK_API_ORIGIN = "https://replace.invalid"
+LANDINGAI_PARSE_MODEL = "REPLACE_WITH_TESTED_PARSE_VERSION"
+LANDINGAI_EXTRACT_MODEL = "REPLACE_WITH_TESTED_EXTRACT_VERSION"
+
+# Cron and queue consumption are deliberately disabled in this template.
+[triggers]
+crons = []
+# Candidate after acceptance: crons = ["* * * * *"]
+
+# Candidate queue consumer after acceptance (create both queues first):
+# [[queues.consumers]]
+# queue = "reink-extraction-test"
+# dead_letter_queue = "reink-extraction-test-dlq"
+# max_batch_size = 1
+# max_concurrency = 1
+# max_retries = 50
+# retry_delay = 30
+
+# REINK_WORKER_TOKEN, REINK_DISPATCH_SCHEDULER_TOKEN, and
+# REINK_EXPIRY_SCHEDULER_TOKEN, and REINK_CLEANUP_SCHEDULER_TOKEN are secrets. Never put values in this file.

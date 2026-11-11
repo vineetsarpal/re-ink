@@ -200,6 +200,8 @@ export type PartyType = 'cedant' | 'reinsurer' | 'broker' | 'other';
 
 export interface SystemConfig {
   agent_offline_mode: boolean;
+  provider_credentials_enabled: boolean;
+  trial_routing_enabled: boolean;
 }
 
 export type OrganizationRole = 'admin' | 'member' | 'viewer';

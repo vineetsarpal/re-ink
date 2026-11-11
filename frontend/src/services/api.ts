@@ -29,6 +29,18 @@ const api = axios.create({
   },
 });
 
+export const providerCredentialApi = {
+  get: async (): Promise<{ configured: boolean }> =>
+    (await api.get<{ configured: boolean }>('/provider-credentials/landingai')).data,
+  save: async (apiKey: string): Promise<{ configured: boolean }> =>
+    (await api.put<{ configured: boolean }>('/provider-credentials/landingai', { api_key: apiKey })).data,
+  remove: async (): Promise<void> => { await api.delete('/provider-credentials/landingai'); },
+  getAcknowledgment: async (): Promise<{ acknowledged: boolean }> =>
+    (await api.get('/provider-credentials/landingai/acknowledgment')).data,
+  acknowledge: async (): Promise<{ acknowledged: boolean }> =>
+    (await api.post('/provider-credentials/landingai/acknowledgment')).data,
+};
+
 /**
  * Auth bridge. The axios client lives outside React, but the WorkOS access
  * token comes from the `authkit-react` hook inside React. `AuthBridge` registers
@@ -73,6 +85,8 @@ api.interceptors.response.use(
 
 // Document APIs
 export const documentApi = {
+  usage: async (): Promise<{ monthly_successes: number; monthly_pending: number; monthly_limit: number; free_remaining: number; resets_at: string }> =>
+    (await api.get('/documents/usage')).data,
   /**
    * Upload a document for extraction.
    * @param apiKey - LandingAI API key supplied by the user (BYOK)
@@ -103,6 +117,9 @@ export const documentApi = {
     const response = await api.get<DocumentExtractionStatus>(`/documents/status/${jobId}`);
     return response.data;
   },
+
+  retry: async (jobId: string): Promise<DocumentUploadResponse> =>
+    (await api.post<DocumentUploadResponse>(`/documents/${jobId}/retry`)).data,
 
   /**
    * Get the extraction results for a completed job.

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Building2, KeyRound, Network, ShieldCheck } from 'lucide-react';
-import { adminApi, type AdminPortalIntent } from '@/services/api';
+import { adminApi, providerCredentialApi, systemApi, type AdminPortalIntent } from '@/services/api';
 
 const ACTIONS: { intent: AdminPortalIntent; title: string; description: string; Icon: typeof KeyRound }[] = [
   { intent: 'sso', title: 'Connect identity provider', description: 'Set up SAML or OpenID Connect single sign-on.', Icon: KeyRound },
@@ -11,13 +11,53 @@ const ACTIONS: { intent: AdminPortalIntent; title: string; description: string; 
 export const OrganizationSettingsPage: React.FC = () => {
   const [loading, setLoading] = useState<AdminPortalIntent | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [credentialConfigured, setCredentialConfigured] = useState<boolean | null>(null);
+  const [credentialEnabled, setCredentialEnabled] = useState(false);
+  const [credentialKey, setCredentialKey] = useState('');
+  const [credentialBusy, setCredentialBusy] = useState(false);
+  const [credentialMessage, setCredentialMessage] = useState<string | null>(null);
+  const [credentialError, setCredentialError] = useState<string | null>(null);
+  useEffect(() => {
+    systemApi.getConfig().then(async (config) => {
+      setCredentialEnabled(config.provider_credentials_enabled);
+      if (config.provider_credentials_enabled) setCredentialConfigured((await providerCredentialApi.get()).configured);
+    })
+      .catch(() => setCredentialError('Unable to load LandingAI key settings.'));
+  }, []);
+  const saveCredential = async (event: React.FormEvent) => {
+    event.preventDefault(); setCredentialBusy(true); setCredentialError(null); setCredentialMessage(null);
+    try {
+      const status = await providerCredentialApi.save(credentialKey);
+      setCredentialConfigured(status.configured); setCredentialKey(''); setCredentialMessage('LandingAI key saved.');
+    } catch (err: any) {
+      setCredentialError(err?.response?.status === 422 ? 'LandingAI could not authenticate this key.' : 'Unable to validate or save the key. Please try again.');
+    } finally { setCredentialBusy(false); }
+  };
+  const removeCredential = async () => {
+    setCredentialBusy(true); setCredentialError(null); setCredentialMessage(null);
+    try { await providerCredentialApi.remove(); setCredentialConfigured(false); setCredentialKey(''); setCredentialMessage('LandingAI key removed.'); }
+    catch { setCredentialError('Unable to remove the key. Please try again.'); }
+    finally { setCredentialBusy(false); }
+  };
   const openPortal = async (intent: AdminPortalIntent) => {
     setLoading(intent); setError(null);
     try { window.location.assign(await adminApi.getPortalLink(intent)); }
     catch (err: any) { setError(err?.response?.data?.detail ?? 'Unable to open the WorkOS Admin Portal. Please try again.'); setLoading(null); }
   };
   return <div className="organization-settings-page">
-    <header className="page-header"><div><h1>Organization settings</h1><p>Configure enterprise identity and secure access for your workspace.</p></div></header>
+    <header className="page-header"><div><h1>Organization settings</h1><p>Manage extraction and secure access for your workspace.</p></div></header>
+    {credentialEnabled && <section className="members-card"><h2><KeyRound size={20} /> LandingAI key</h2>
+      <p>{credentialConfigured === null ? 'Checking key settings…' : credentialConfigured ? 'A key is saved for your organization.' : 'No organization key is saved.'}</p>
+      <p>Get an API key from your <a href="https://landing.ai/" target="_blank" rel="noreferrer">LandingAI account</a>. Usage with your key is charged to your LandingAI account.</p>
+      {credentialError && <p className="members-error" role="alert">{credentialError}</p>}
+      {credentialMessage && <p role="status">{credentialMessage}</p>}
+      <form className="provider-key-form" onSubmit={(event) => void saveCredential(event)}>
+        <label htmlFor="landingai-key">{credentialConfigured ? 'Replace API key' : 'API key'}</label>
+        <input id="landingai-key" type="password" autoComplete="off" value={credentialKey} onChange={(event) => setCredentialKey(event.target.value)} />
+        <button className="btn btn-primary" type="submit" disabled={credentialBusy || !credentialKey.trim()}>Save key</button>
+        {credentialConfigured && <button className="btn btn-secondary" type="button" disabled={credentialBusy} onClick={() => void removeCredential()}>Remove key</button>}
+      </form>
+    </section>}
     {error && <div className="members-error" role="alert">{error}</div>}
     <section className="members-card"><h2><Building2 size={20} /> Enterprise identity</h2><div className="settings-actions">
       {ACTIONS.map(({ intent, title, description, Icon }) => <article key={intent} className="settings-action"><Icon size={22} /><div><h3>{title}</h3><p>{description}</p></div><button className="btn btn-primary" disabled={loading !== null} onClick={() => void openPortal(intent)}>{loading === intent ? 'Opening…' : 'Configure'}</button></article>)}

@@ -532,6 +532,9 @@ body {
 .members-error .btn { margin-left: 0.75rem; }
 
 .settings-actions { display: grid; gap: 0.75rem; }
+.provider-key-form { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+.provider-key-form label { width: 100%; font-weight: 600; }
+.provider-key-form input { flex: 1 1 18rem; min-width: 0; padding: 0.65rem; border: 1px solid var(--border-color); border-radius: 0.4rem; }
 .settings-action { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 1rem; padding: 1rem; border: 1px solid var(--border-color); border-radius: 0.6rem; }
 .settings-action > svg { color: var(--primary-color); }
 .settings-action h3 { margin: 0; font-size: 1rem; }

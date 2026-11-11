@@ -9,10 +9,13 @@ org gets that org back rather than a second one.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 from workos import WorkOSClient
 
 from app.core.auth import CurrentUser, get_authenticated_user
 from app.core.config import settings
+from app.db.database import get_db
 
 router = APIRouter()
 
@@ -58,6 +61,7 @@ def _workos_client() -> WorkOSClient:
 @router.post("/provision-organization", response_model=ProvisionOrganizationResponse)
 def provision_organization(
     user: CurrentUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
 ) -> ProvisionOrganizationResponse:
     """Ensure the caller belongs to an organization, creating a dedicated one if not."""
     if not settings.WORKOS_API_KEY:
@@ -66,6 +70,10 @@ def provision_organization(
             detail="Organization provisioning is not configured on this server.",
         )
 
+    # Hold the lock through membership creation to serialize normal concurrent
+    # requests across processes. WorkOS failures can still leave an orphan org.
+    db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+               {"key": f"reink:provision-organization:{user.user_id}"})
     client = _workos_client()
 
     # Idempotent: reuse an existing membership rather than creating a duplicate org.
@@ -78,6 +86,8 @@ def provision_organization(
         )
 
     workos_user = client.user_management.get_user(user.user_id)
+    if getattr(workos_user, "email_verified", False) is not True:
+        raise HTTPException(status_code=403, detail="Verify your email before provisioning an organization.")
     domain = _email_domain(workos_user.email)
     if domain:
         verified_orgs = _verified_domain_orgs(
