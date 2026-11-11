@@ -32,7 +32,7 @@ def claim_preparation(db, job_id: str, attempt_id: str) -> dict:
     if attempt.execution_key is not None:
         return {"decision": "closed"}
     reservation = db.get(QuotaReservation, (job.org_id, attempt_id))
-    if reservation is None and settings.EXTRACTION_QUOTA_ENABLED:
+    if reservation is None:
         raise HTTPException(409, "Extraction reservation unavailable")
     token = secrets.token_urlsafe(32)
     digest = hashlib.sha256(token.encode()).hexdigest()

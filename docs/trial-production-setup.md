@@ -138,35 +138,280 @@ expiry; no exactly-once provider execution guarantee is made.
 
 ### Coordinated protocol-2 rollout
 
-These are operator instructions for a separately authorized deployment; this
-follow-up performs local validation only. Do not roll either side independently.
+For a **separately authorized** production window; only local help/SQL checks
+were performed during this review. Freeze other backend merges/deploys:
+`.github/workflows/deploy.yml` runs **upgrade head → FastAPI deploy** on backend
+pushes to `main`. Do not merge until step 4. Record the old backend SHA, Worker
+version and allowlist; use linked, clean release checkouts. Preserve keys, grants
+and quota counters. Commands start at repo root; keep shell tracing off.
 
-1. **Pause:** block new upload/retry admission at the ingress and pause queue
-   consumption and dispatch scheduling. Keep expiry and cleanup running. Do not
-   use a backend flag change that disables terminal delivery during draining.
-2. **Drain:** wait for every in-flight Worker invocation and backend machine
-   request to finish (allow the full 15-minute consumer wall-clock window).
-   Confirm no active invocations remain. Inspect unresolved attempts and queued
-   messages; let ambiguous attempts expire rather than replaying provider calls.
-3. **Deploy backend + Worker:** with admission, dispatch and consumption still
-   paused, apply 0016 and deploy the matching backend and Worker artifacts.
-   Existing grants suffice; do not rerun provisioning. The backend now requires
-   `X-Extraction-Protocol: 2` on claim and rejects completed checkpoints and
-   settlement without `provider_started`. The Worker first authenticates a GET
-   to the attempt's `/protocol` endpoint and requires `protocol_version: "2"`
-   before sending any claim. An old backend returns 404 there; an old Worker
-   fails the new claim version check with 409. Neither mismatch spends a start
-   or calls LandingAI. Worker logs use `extraction_protocol_mismatch`; backend
-   claim errors contain `EXTRACTION_PROTOCOL_MISMATCH`.
-4. **Verify:** while public admission stays blocked, verify the authenticated
-   protocol probe, missing/wrong-version claim rejection, and unchanged start
-   counters. In an isolated synthetic canary, verify preparation leaves starts
-   unchanged, provider authorization increments once, completion requires that
-   authorization, and capacity denial settles as `TRIAL_CAPACITY_UNAVAILABLE`
-   without a start. Verify status hides retry under quota/rate denial and for
-   non-retryable failures, plus durable checkpoint replay. Stop rollout if any
-   check fails; keep both sides paused while restoring a matching pair.
-5. **Resume:** enable dispatch and queue consumption, observe the canary through
-   checkpoint and settlement, then reopen public admission. Monitor protocol
-   errors, starts, queue age, timeouts and capacity denials. Rollback also requires
-   pause → drain → deploy a matching pair → verify → resume.
+Verified locally with Wrangler **4.160.1** ([exact help capture](trial-rollout-wrangler-help.txt)):
+`queues`, `pause-delivery`, `resume-delivery`, `info`, `triggers deploy`, `deploy`,
+`tail`. Recheck help when changing versions.
+
+**1. Block intake on the currently running backend release.** From its linked
+checkout (not the candidate checkout), keep `CLOUDFLARE_TRIAL_ENABLED=true`,
+`CLOUDFLARE_ENABLED=true`, `EXTRACTION_QUOTA_ENABLED=true` and existing keys/limits.
+Set the allowlist to empty, then deploy that **same old backend code** so all
+processes pick up the setting:
+
+```sh
+cd backend
+uv run fastapi cloud env set TRIAL_ALLOWED_ORGANIZATION_IDS '[]'
+uv run fastapi deploy --app-id "$FASTAPI_CLOUD_APP_ID"
+cd ..
+```
+
+The FastAPI CLI forms above were verified with local `--help`; the same setting
+can be applied through FastAPI Cloud's app environment settings and redeploy.
+Require authenticated upload/retry 503 for a previously allowed org. Admitted
+requests can finish; status and machine/maintenance routes stay enabled.
+**Trial=false permits legacy uploads; Cloudflare=false blocks draining.**
+Preserve the empty allowlist through CI.
+
+**2. Stop cron dispatch, drain the old matched pair, then pause delivery.** Make
+a local, uncommitted config beside the original so its relative `main` stays
+valid. This only changes schedules; it retains the consumer configuration:
+
+```sh
+python3 - <<'PYCONFIG'
+from pathlib import Path
+p = Path('workflows/cloudflare/wrangler.toml')
+s = p.read_text()
+assert s.count('crons = ["* * * * *"]') == 1
+p.with_name('wrangler.rollout.toml').write_text(s.replace('crons = ["* * * * *"]', 'crons = []'))
+PYCONFIG
+npx wrangler triggers deploy --config workflows/cloudflare/wrangler.rollout.toml
+```
+
+Confirm **no Cron Triggers** in the Worker dashboard (`triggers deploy` is
+experimental). Empty crons stops dispatch; leaving cron on would enqueue work.
+It also stops expiry/cleanup: invoke them manually with existing dedicated
+tokens. Let scheduled invocations already running finish; keep old Worker code.
+
+Create this helper: use scheduler tokens for maintenance and a synthetic user's
+access token for document routes. Hidden prompts keep credentials out of history:
+
+```sh
+cat > /tmp/reink-rollout-http.py <<'PYHTTP'
+import getpass, sys
+import httpx
+method, path = sys.argv[1:3]
+headers = {"Authorization": "Bearer " + getpass.getpass("Bearer credential for " + path + ": ")}
+with httpx.Client(base_url="https://re-ink.fastapicloud.dev", timeout=60, follow_redirects=False) as c:
+    if len(sys.argv) == 4:
+        with open(sys.argv[3], "rb") as f:
+            r = c.request(method, path, headers=headers, files={"file": ("synthetic.pdf", f, "application/pdf")})
+    else:
+        r = c.request(method, path, headers=headers)
+    print("HTTP", r.status_code)
+    r.raise_for_status()
+    data = r.json()
+    print({k: data[k] for k in ("job_id", "status", "processed", "attempted", "error_code") if k in data})
+PYHTTP
+cd backend
+uv run python /tmp/reink-rollout-http.py POST /api/maintenance/cloudflare-dispatch
+uv run python /tmp/reink-rollout-http.py POST /api/maintenance/expiry
+uv run python /tmp/reink-rollout-http.py POST /api/maintenance/cleanup
+cd ..
+```
+
+Repeat bounded dispatch/expiry as needed with the **old** consumer still running;
+maintain cleanup periodically. When SQL active counts and backlog are zero:
+
+```sh
+npx wrangler queues pause-delivery reink-extraction --config workflows/cloudflare/wrangler.rollout.toml
+npx wrangler queues info reink-extraction --config workflows/cloudflare/wrangler.rollout.toml
+npx wrangler queues info reink-extraction-dlq --config workflows/cloudflare/wrangler.rollout.toml
+```
+
+`info` checks identity/wiring only. **Wrangler has no backlog command or pause
+status output** (confirmed in its bundled `src/queues/cli/commands/info.ts`).
+In Queues dashboard, confirm `reink-extraction` is paused and backlog is zero;
+check the DLQ too. Require fresh, stable metrics. If work remains, resume the
+old consumer (step-6 command), drain, then pause again. Never purge/pull/ack/replay
+messages to fake a drain; investigate DLQ entries separately.
+
+**3. Confirm database and invocation drain.** Save this read-only check locally;
+the owner wrapper hides the URL and requires confirmation of the production
+endpoint. Do not substitute the tenant app role: RLS would hide other orgs.
+
+```sh
+cat > /tmp/reink-rollout-check.py <<'PYSQL'
+import os, sys
+import psycopg
+from psycopg.rows import dict_row
+queries = [
+    "SELECT version_num FROM public.alembic_version",
+    """SELECT count(*) AS pending_outbox_total,
+       count(*) FILTER (WHERE a.status IN ('queued','processing') AND j.deleted_at IS NULL
+         AND j.selected_attempt_id=a.attempt_id) AS pending_outbox_active,
+       count(*) FILTER (WHERE o.lease_until > clock_timestamp()) AS live_dispatch_leases
+       FROM public.workflow_outbox o JOIN public.extraction_attempts a USING(attempt_id)
+       JOIN public.extraction_jobs j ON j.job_id=a.job_id WHERE o.acknowledged_at IS NULL""",
+    """SELECT count(*) FILTER (WHERE a.status='queued') AS queued,
+       count(*) FILTER (WHERE a.status='processing') AS processing
+       FROM public.extraction_attempts a JOIN public.extraction_jobs j ON j.job_id=a.job_id
+       WHERE j.deleted_at IS NULL AND j.selected_attempt_id=a.attempt_id""",
+    "SELECT month,trial_starts,trial_successes,trial_pending FROM public.extraction_quota_global WHERE id=1",
+    """SELECT (SELECT count(*) FROM public.storage_cleanup WHERE lease_until > clock_timestamp()) AS cleanup_leases,
+       (SELECT count(*) FROM public.upload_intents WHERE cleanup_lease_until > clock_timestamp()) AS upload_cleanup_leases""",
+]
+with psycopg.connect(os.environ['DATABASE_URL'], row_factory=dict_row) as c:
+    c.read_only = True
+    for q in queries:
+        print(c.execute(q).fetchall())
+    if len(sys.argv) == 2:
+        print(c.execute("""SELECT a.status, r.status AS reservation, r.provider_started,
+            x.terminal_event->>'status' AS checkpoint,
+            EXISTS (SELECT 1 FROM public.workflow_receipts w WHERE w.attempt_id=a.attempt_id AND w.event_id='terminal') AS delivered
+            FROM public.extraction_jobs j JOIN public.extraction_attempts a ON a.attempt_id=j.selected_attempt_id
+            LEFT JOIN public.extraction_quota_reservations r ON r.org_id=a.org_id AND r.attempt_id=a.attempt_id
+            LEFT JOIN public.cloudflare_executions x ON x.attempt_id=a.attempt_id WHERE j.job_id=%s""", (sys.argv[1],)).fetchall())
+    c.rollback()
+PYSQL
+cd backend
+uv run python ../deploy/storage/run_as_owner.py --target production uv run python /tmp/reink-rollout-check.py
+uv run python ../deploy/storage/run_as_owner.py --target production uv run python ../deploy/storage/check_trial_schema.py
+cd ..
+```
+
+Require active outbox, live dispatch leases, queued, processing and queue
+backlog all zero. Total pending outbox can contain terminal/expired rows;
+reconcile rather than delete them. After pausing, allow the full 15-minute
+invocation window since last delivery plus any abandoned backend request.
+Confirm zero active Worker/backend requests in monitoring and repeat all checks.
+Expire ambiguous attempts; do not replay their provider calls. Stop if unproven.
+
+**4. Merge and verify the backend while everything stays paused.** Merge the
+approved backend PR into `main` through the normal review process. Wait for the
+`Deploy to FastAPI Cloud` workflow for that exact merge SHA to pass **both**
+`Run database migrations` and `Deploy`. Do not launch a competing manual deploy.
+Rerun step 3: require revision `0016_cleanup_backoff`, unchanged schema counts,
+no definer-function access for `reink_app`, and `search_path=pg_catalog, pg_temp`.
+Reconfirm intake returns 503 and the allowlist is still empty.
+
+Probe protocol 2 without claiming or reserving a job (the route validates the
+signed capability but does not access the DB). Supply existing secrets only at
+the hidden prompts; never print/store the capability:
+
+```sh
+cd backend
+uv run python - <<'PYPROBE'
+import base64, getpass
+import httpx
+from app.services.dispatch_capability import issue_capability
+key = base64.b64decode(getpass.getpass('CLOUDFLARE_CAPABILITY_KEY: '), altchars=b'-_', validate=True)
+token = getpass.getpass('CLOUDFLARE_MACHINE_TOKEN: ')
+cap = issue_capability(key, 'rollout-probe', 'rollout-probe', 'rollout-probe', ttl_seconds=300)
+with httpx.Client(follow_redirects=False, timeout=20) as c:
+    r = c.get('https://re-ink.fastapicloud.dev/api/cloudflare/jobs/rollout-probe/attempts/rollout-probe/protocol',
+              headers={'Authorization': 'Bearer ' + token, 'X-Dispatch-Capability': cap})
+    assert r.status_code == 200, r.status_code
+    assert r.json() == {'protocol_version': '2'}
+print('Backend protocol 2 verified; no claim sent')
+PYPROBE
+cd ..
+```
+
+**5. Deploy the new Worker with cron still off.** From the approved new Worker
+checkout, regenerate the step-2 paused config from its `wrangler.toml`, then:
+
+```sh
+npx wrangler deploy --config workflows/cloudflare/wrangler.rollout.toml
+npx wrangler queues pause-delivery reink-extraction --config workflows/cloudflare/wrangler.rollout.toml
+npx wrangler queues info reink-extraction --config workflows/cloudflare/wrangler.rollout.toml
+```
+
+Recheck pause state and absent cron. The final `wrangler.toml` would restart
+cron dispatch; do not deploy it yet. The consumer remains configured but paused.
+
+**6. Controlled canary, then general resume.** With cron off/backlog empty,
+allow **only the synthetic org** and apply it on the same new backend release:
+
+```sh
+cd backend
+uv run fastapi cloud env set TRIAL_ALLOWED_ORGANIZATION_IDS '["org_REPLACE_SYNTHETIC"]'
+uv run fastapi deploy --app-id "$FASTAPI_CLOUD_APP_ID"
+cd ..
+```
+
+Keep trial/Cloudflare/quotas true; verify other orgs get 503. Canary delivery
+requires a controlled queue resume before general intake:
+
+```sh
+cd backend
+uv run python /tmp/reink-rollout-http.py POST /api/provider-credentials/landingai/acknowledgment
+uv run python /tmp/reink-rollout-http.py POST /api/documents/upload /absolute/path/to/synthetic.pdf
+# Record job_id from the upload response, and supply the dispatch scheduler token:
+uv run python /tmp/reink-rollout-http.py POST /api/maintenance/cloudflare-dispatch
+cd ..
+npx wrangler queues resume-delivery reink-extraction --config workflows/cloudflare/wrangler.rollout.toml
+# Poll using the synthetic user's token (replace JOB_ID with the recorded ID):
+cd backend
+uv run python /tmp/reink-rollout-http.py GET /api/documents/status/JOB_ID
+cd ..
+```
+
+Poll to completion; inspect synthetic results/guided review in the authenticated
+UI. Rerun the step-3 check with the job ID (command below): require a completed
+checkpoint and delivered receipt, succeeded reservation and provider_started.
+For a trial-funded canary, global starts/successes each increase by exactly one,
+with no pending quota left; preparation alone must not spend a start. Check
+protocol/maintenance errors. On failure pause again and roll back, not retry.
+
+```sh
+cd backend
+uv run python ../deploy/storage/run_as_owner.py --target production uv run python /tmp/reink-rollout-check.py JOB_ID
+cd ..
+```
+
+After successful verification, restore the final Worker configuration and cron:
+
+```sh
+npx wrangler deploy --config workflows/cloudflare/wrangler.toml
+npx wrangler queues resume-delivery reink-extraction --config workflows/cloudflare/wrangler.toml
+npx wrangler queues info reink-extraction --config workflows/cloudflare/wrangler.toml
+```
+
+Verify the minute cron, intended consumer and live expiry/cleanup. Restore the
+recorded approved intake allowlist in FastAPI Cloud and redeploy the **same**
+verified backend release. Observe queue age, starts and errors before ending the
+window. Remove the temporary config/helpers; never commit them or credentials.
+
+**Rollback if verification fails.** Empty the allowlist and apply it on the
+current backend, stop cron with step 2, pause delivery, then wait for the same
+invocation/SQL drain. Manually run expiry/cleanup as needed. If failed-canary
+messages remain, first let their attempts become terminal, briefly resume the
+current matched pair to acknowledge closed/terminal deliveries, then confirm
+zero backlog and pause again before switching versions. Preserve ambiguous
+attempts and consumed starts; never replay provider work or reset accounting.
+
+Prefer a rollback app/Worker pair that **retains migration 0016 and its revision
+file**. Its added counter and same-signature function are compatible with prior
+application code. Prepare an approved rollback PR reverting application changes
+while keeping migration history; merging it still runs `upgrade head`. Never
+merge an old tree missing 0016 while the DB records that revision. Deploy the
+matching Worker through the cron-off config, reprobe the pair's expected protocol
+(an older matched pair may predate protocol 2), and repeat the canary before
+restoring the final config, delivery and intake. Do not mix old Worker/new
+backend or new Worker/old backend; mismatch refuses work.
+
+A schema downgrade is optional, **not** the default rollback. If explicitly
+chosen, keep intake, cron and delivery paused and all CI backend deployments
+held; verify no active cleanup leases/requests as well as extraction drain:
+
+```sh
+cd backend
+uv run python ../deploy/storage/run_as_owner.py --target production uv run python -m alembic downgrade 0015_trial_hardening
+uv run python ../deploy/storage/run_as_owner.py --target production uv run python ../deploy/storage/check_trial_schema.py
+cd ..
+```
+
+0016 downgrade restores the verbatim 0015 function (same ACL and hardened
+search_path), restores five-minute cleanup scheduling and drops only
+`upload_intents.cleanup_failures`; its failure-count history is lost. Verify
+revision/function/ACL before deploying compatible code. The next ordinary CI
+`upgrade head` will reapply 0016 if its file remains, so do not release the CI
+hold until the intended schema target is agreed. Neither path changes roles or
+grants; stop for approval if production privileges prove insufficient.

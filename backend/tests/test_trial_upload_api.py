@@ -13,7 +13,7 @@ from app.core.config import settings
 def test_incomplete_cloudflare_configuration_cannot_start():
     from app.core.config import Settings
     with pytest.raises(ValidationError):
-        Settings(_env_file=None, DATABASE_URL="postgresql://app@localhost/db", CLOUDFLARE_ENABLED=True)
+        Settings(_env_file=None, DATABASE_URL="postgresql://app@localhost/db", CLOUDFLARE_ENABLED=True, EXTRACTION_QUOTA_ENABLED=True)
     with pytest.raises(ValidationError):
         Settings(_env_file=None, DATABASE_URL="postgresql://app@localhost/db", CLOUDFLARE_TRIAL_ENABLED=True)
 
@@ -23,6 +23,7 @@ def _cloudflare_options():
             for role in ("machine", "dispatch", "expiry", "cleanup")]
     return dict(
         DATABASE_URL="postgresql://app@db.neon.tech/reink_db", CLOUDFLARE_ENABLED=True,
+        EXTRACTION_QUOTA_ENABLED=True,
         CLOUDFLARE_MACHINE_DATABASE_URL=urls[0], CLOUDFLARE_DISPATCH_DATABASE_URL=urls[1],
         CLOUDFLARE_EXPIRY_DATABASE_URL=urls[2], CLOUDFLARE_CLEANUP_DATABASE_URL=urls[3],
         CLOUDFLARE_MACHINE_TOKEN="a" * 32, CLOUDFLARE_DISPATCH_TOKEN="b" * 32,
@@ -219,3 +220,12 @@ def test_five_free_completions_then_customer_key(as_org, db_session, monkeypatch
         assert client.post(f"/api/documents/{job_id}/retry").status_code == 409
     finally:
         app.dependency_overrides.pop(machine_db, None)
+
+
+def test_cloudflare_transport_requires_quotas_even_without_trial():
+    from app.core.config import Settings
+
+    options = _cloudflare_options()
+    options.update(CLOUDFLARE_TRIAL_ENABLED=False, EXTRACTION_QUOTA_ENABLED=False)
+    with pytest.raises(ValidationError, match="CLOUDFLARE_ENABLED requires EXTRACTION_QUOTA_ENABLED"):
+        Settings(_env_file=None, **options)

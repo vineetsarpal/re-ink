@@ -53,28 +53,62 @@ The existing scheduled request timeout is 45 seconds. Dispatch's budget is check
 
 ### Coordinated rollout (protocol 2)
 
-Use **pause → drain → deploy backend + Worker → verify → resume** for upgrades
-and rollbacks. Do not deploy one side while work is running.
+Follow the [ordered production runbook](../../docs/trial-production-setup.md#coordinated-protocol-2-rollout)
+for the full commands, hidden credential prompts, read-only SQL, protocol probe,
+canary and rollback. CLI syntax was checked against Wrangler **4.160.1**
+([captured local help](../../docs/trial-rollout-wrangler-help.txt)); no production
+operations were run during this review.
 
-1. Pause public upload/retry admission, dispatch scheduling and queue consumption;
-   leave expiry/cleanup available and terminal delivery enabled.
-2. Drain all existing Worker invocations and backend requests, allowing the full
-   15-minute invocation window. Confirm zero active invocations. Resolve queued
-   and ambiguous attempts through expiry; never manually replay a provider call.
-3. Deploy migration 0016, the backend and matching Worker while paused. Existing
-   role grants suffice. `claim_preparation` is preparation only. The Worker first
-   GETs the authenticated attempt `/protocol`, requires `protocol_version: "2"`,
-   then sends `X-Extraction-Protocol: 2` with claim. A missing/older probe stops
-   before claim; a missing/wrong claim version returns 409 before starting work.
-   Watch `extraction_protocol_mismatch` Worker logs and backend
-   `EXTRACTION_PROTOCOL_MISMATCH` errors. No mismatch consumes starts or calls ADE.
-4. Verify the probe and negative claim checks with unchanged counters, then run
-   an isolated synthetic canary: prepare without a start, authorize exactly once,
-   checkpoint and settle. Also verify cap denial and non-retryable/quota-denied
-   retry UI. Keep public admission closed until these checks pass.
-5. Resume dispatch/consumption for the canary, observe delivery and settlement,
-   then reopen admission and monitor counters, protocol errors and queue age.
+1. On the current backend release, keep trial/Cloudflare/quotas enabled, set
+   `TRIAL_ALLOWED_ORGANIZATION_IDS=[]` in FastAPI Cloud and redeploy the same
+   release. Verify upload/retry 503. Setting trial=false permits legacy uploads;
+   setting Cloudflare=false prevents in-flight delivery and maintenance.
+2. Generate `wrangler.rollout.toml` beside the production config by replacing
+   `crons = ["* * * * *"]` with `crons = []` (runbook step 2). Stop cron:
 
-See [the production procedure](../../docs/trial-production-setup.md#coordinated-protocol-2-rollout)
-for the full checklist. A failed verification keeps rollout paused; restore both
-artifacts together before resuming.
+   ```sh
+   npx wrangler triggers deploy --config workflows/cloudflare/wrangler.rollout.toml
+   ```
+
+   Keep the old matched consumer running while manually invoking bounded
+   dispatch/expiry/cleanup as documented. Require zero active pending outbox,
+   queued/processing attempts and queue backlog before pausing delivery:
+
+   ```sh
+   npx wrangler queues pause-delivery reink-extraction --config workflows/cloudflare/wrangler.rollout.toml
+   npx wrangler queues info reink-extraction --config workflows/cloudflare/wrangler.rollout.toml
+   ```
+
+   `info` verifies identity/wiring, **not backlog or pause state**; this Wrangler
+   has no backlog command. Confirm those in Queues dashboard metrics/settings,
+   including DLQ, and repeat the read-only SQL after all invocations drain.
+3. Only then merge backend changes to `main`: CI automatically applies 0016
+   and deploys FastAPI. Require both steps for the exact merge SHA to pass,
+   revision `0016_cleanup_backoff` and the authenticated `/api/cloudflare/jobs/
+   {job_id}/attempts/{attempt_id}/protocol` probe returning version `2`.
+4. Deploy the new Worker with the **cron-off** config and reaffirm queue pause:
+
+   ```sh
+   npx wrangler deploy --config workflows/cloudflare/wrangler.rollout.toml
+   npx wrangler queues pause-delivery reink-extraction --config workflows/cloudflare/wrangler.rollout.toml
+   ```
+
+5. Allow only the synthetic org, admit one synthetic PDF, manually dispatch it,
+   then use `queues resume-delivery` with the paused config for controlled canary
+   delivery. Cron stays off. Verify completion/results, checkpoint/settlement,
+   exactly one trial start and no pending reservation before general resume.
+6. After the canary passes, deploy the **final** config, enable delivery, verify
+   the restored cron and maintenance, then restore the approved intake allowlist:
+
+   ```sh
+   npx wrangler deploy --config workflows/cloudflare/wrangler.toml
+   npx wrangler queues resume-delivery reink-extraction --config workflows/cloudflare/wrangler.toml
+   ```
+
+A plain deploy of the final config earlier would re-enable the minute cron and
+consumer configuration. Queue pause alone cannot drain an existing backlog.
+On failure, empty intake, stop cron, pause/drain and restore a **matching** pair.
+Prefer keeping 0016 and its revision file in the rollback PR; dropping the
+revision file breaks CI against an already-upgraded DB. The runbook gives the
+optional owner-run downgrade to 0015, ACL/search_path checks and CI hold needed
+to prevent automatic re-upgrade. No provisioning or grant changes are required.

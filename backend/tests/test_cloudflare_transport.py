@@ -24,6 +24,9 @@ def machine_client(db_session):
                                      status="queued", created_at=now, deadline_at=now + timedelta(minutes=5)))
     db_session.flush()
     db_session.add(WorkflowOutbox(attempt_id="attempt-a", org_id="org-alpha", payload={}, next_delivery_at=now, delivery_count=0))
+    # Every admitted Cloudflare attempt must have a reservation, even outside trial mode.
+    from app.services.extraction_quota import reserve_extraction
+    reserve_extraction(db_session, "org-alpha", "attempt-a", has_customer_key=False, global_trial_limit=100)
     db_session.commit()
     app = FastAPI()
     app.include_router(router)
@@ -36,15 +39,6 @@ def machine_client(db_session):
 def machine_headers():
     return {"X-Extraction-Protocol": "2", "Authorization": f"Bearer {WORKER_TOKEN}",
             "X-Dispatch-Capability": issue_capability(SIGNING_KEY, "org-alpha", "job-a", "attempt-a", ttl_seconds=300)}
-
-
-@pytest.fixture
-def reserved_machine(machine_client, db_session):
-    from app.services.extraction_quota import reserve_extraction
-    bind_session_to_org(db_session, "org-alpha")
-    reserve_extraction(db_session, "org-alpha", "attempt-a", has_customer_key=False, global_trial_limit=100)
-    db_session.commit()
-    return machine_client
 
 
 def test_machine_claim_requires_both_worker_credential_and_job_capability(machine_client):
@@ -190,11 +184,10 @@ def test_expired_checkpoint_commits_timeout_before_rejection(machine_client, db_
     assert db_session.get(ExtractionAttempt, "attempt-a").status == "timed_out"
 
 
-def test_preparation_does_not_spend_start_and_provider_authorization_is_one_shot(reserved_machine, db_session, monkeypatch, machine_headers):
+def test_preparation_does_not_spend_start_and_provider_authorization_is_one_shot(machine_client, db_session, monkeypatch, machine_headers):
     from app.core.config import settings
     from app.models.extraction_quota import GlobalQuota, QuotaReservation
     monkeypatch.setattr(settings, "EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT", 100)
-    machine_client = reserved_machine
     base = "/cloudflare/jobs/job-a/attempts/attempt-a"
     headers = machine_headers.copy()
     grant = machine_client.post(base + "/claim", headers=headers)
@@ -214,11 +207,10 @@ def test_preparation_does_not_spend_start_and_provider_authorization_is_one_shot
 
 
 @pytest.mark.parametrize("cap", [0, 100])
-def test_preparation_failure_or_cap_denial_settles_without_spending_a_start(reserved_machine, db_session, monkeypatch, cap, machine_headers):
+def test_preparation_failure_or_cap_denial_settles_without_spending_a_start(machine_client, db_session, monkeypatch, cap, machine_headers):
     from app.core.config import settings
     from app.models.extraction_quota import GlobalQuota, QuotaReservation
     monkeypatch.setattr(settings, "EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT", cap)
-    machine_client = reserved_machine
     base = "/cloudflare/jobs/job-a/attempts/attempt-a"
     headers = machine_headers.copy()
     grant = machine_client.post(base + "/claim", headers=headers)
@@ -236,8 +228,7 @@ def test_preparation_failure_or_cap_denial_settles_without_spending_a_start(rese
 
 
 @pytest.mark.parametrize("version", [None, "1", "future"])
-def test_incompatible_worker_cannot_claim(reserved_machine, db_session, version):
-    machine_client = reserved_machine
+def test_incompatible_worker_cannot_claim(machine_client, db_session, version):
     from app.models.cloudflare_execution import CloudflareExecution
     headers = {"Authorization": f"Bearer {WORKER_TOKEN}", "X-Dispatch-Capability": issue_capability(SIGNING_KEY, "org-alpha", "job-a", "attempt-a", ttl_seconds=300)}
     if version is not None:

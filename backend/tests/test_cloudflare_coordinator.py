@@ -16,7 +16,7 @@ from app.services.cloudflare_coordinator import claim_preparation, checkpoint_te
 
 
 @pytest.fixture
-def attempt(db_session):
+def unreserved_attempt(db_session):
     bind_session_to_org(db_session, "org-alpha")
     now = datetime.now(timezone.utc)
     db_session.add(ExtractionJob(job_id="job-a", org_id="org-alpha", status="queued", selected_attempt_id="attempt-a"))
@@ -25,6 +25,13 @@ def attempt(db_session):
                                      status="queued", created_at=now, deadline_at=now + timedelta(minutes=5)))
     db_session.flush()
     return db_session
+
+
+@pytest.fixture
+def attempt(unreserved_attempt):
+    from app.services.extraction_quota import reserve_extraction
+    reserve_extraction(unreserved_attempt, "org-alpha", "attempt-a", has_customer_key=False, global_trial_limit=100)
+    return unreserved_attempt
 
 
 def test_redelivery_cannot_reacquire_a_started_provider_call(attempt):
@@ -74,7 +81,9 @@ def test_checkpoint_requires_grant_and_cannot_be_replaced(attempt):
     assert exc.value.status_code == 409
 
 
-def test_concurrent_claims_allow_only_one_provider_call(restricted_engine):
+def test_concurrent_claims_allow_only_one_provider_call(restricted_engine, preserve_global_quota):
+    from app.models.extraction_quota import QuotaReservation, OrganizationQuota, ExtractionRate
+    from app.services.extraction_quota import reserve_extraction
     suffix = uuid.uuid4().hex
     org, job_id, attempt_id = f"org-{suffix}", f"job-{suffix}", f"attempt-{suffix}"
     now = datetime.now(timezone.utc)
@@ -84,6 +93,7 @@ def test_concurrent_claims_allow_only_one_provider_call(restricted_engine):
         session.flush()
         session.add(ExtractionAttempt(attempt_id=attempt_id, job_id=job_id, org_id=org, number=1,
                                       status="queued", created_at=now, deadline_at=now + timedelta(minutes=5)))
+        reserve_extraction(session, org, attempt_id, has_customer_key=True, global_trial_limit=100)
         session.commit()
     barrier = threading.Barrier(2)
 
@@ -102,6 +112,8 @@ def test_concurrent_claims_allow_only_one_provider_call(restricted_engine):
     finally:
         with Session(restricted_engine) as session:
             bind_session_to_org(session, org)
+            for model in (QuotaReservation, OrganizationQuota, ExtractionRate):
+                session.execute(delete(model).where(model.org_id == org))
             session.execute(delete(ExtractionAttempt).where(ExtractionAttempt.attempt_id == attempt_id))
             session.execute(delete(ExtractionJob).where(ExtractionJob.job_id == job_id))
             session.commit()
@@ -166,3 +178,22 @@ def test_completed_checkpoint_requires_counted_provider_start(attempt):
     with pytest.raises(HTTPException) as exc:
         checkpoint_terminal_event(attempt, "job-a", "attempt-a", grant["checkpoint_token"], json.dumps(event).encode())
     assert exc.value.status_code == 409
+
+
+@pytest.mark.parametrize("quota_enabled", [False, True])
+def test_missing_reservation_refuses_preparation_before_claim(unreserved_attempt, monkeypatch, quota_enabled):
+    attempt = unreserved_attempt
+    from app.core.config import settings
+    from app.models.cloudflare_execution import CloudflareExecution
+
+    monkeypatch.setattr(settings, "EXTRACTION_QUOTA_ENABLED", quota_enabled)
+    with pytest.raises(HTTPException) as exc:
+        claim_preparation(attempt, "job-a", "attempt-a")
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "Extraction reservation unavailable"
+    assert attempt.get(CloudflareExecution, "attempt-a") is None
+    record = attempt.get(ExtractionAttempt, "attempt-a")
+    assert record.execution_key is None
+    assert record.accepted_at is None
+    assert record.status == "queued"
+    assert attempt.get(ExtractionJob, "job-a").status == "queued"

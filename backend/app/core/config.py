@@ -134,6 +134,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_cloudflare_configuration(self):
+        if self.CLOUDFLARE_ENABLED and not self.EXTRACTION_QUOTA_ENABLED:
+            raise ValueError("CLOUDFLARE_ENABLED requires EXTRACTION_QUOTA_ENABLED")
         if self.CLOUDFLARE_TRIAL_ENABLED and (not self.CLOUDFLARE_ENABLED or not self.EXTRACTION_QUOTA_ENABLED
                 or not self.LANDINGAI_TRIAL_API_KEY or self.EXTRACTION_GLOBAL_TRIAL_MONTHLY_LIMIT <= 0
                 or self.EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT <= 0):

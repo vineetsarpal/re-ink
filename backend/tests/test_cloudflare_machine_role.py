@@ -63,6 +63,11 @@ def test_machine_role_runs_checkpoint_delivery_without_reading_other_results(mon
                 base = f'/cloudflare/jobs/{job_id}/attempts/{attempt}'
                 headers = {'X-Extraction-Protocol': '2', 'Authorization': f'Bearer {token}', 'X-Dispatch-Capability': issue_capability(key, org, job_id, attempt, ttl_seconds=300)}
                 claim = client.post(base + '/claim', headers=headers)
+                if not with_quota:
+                    # Invalid/legacy configuration must refuse before consuming the claim.
+                    assert claim.status_code == 409, claim.text
+                    assert owner.execute('SELECT count(*) FROM cloudflare_executions WHERE attempt_id=%s', (attempt,)).fetchone()[0] == 0
+                    return
                 assert claim.status_code == 200, claim.text
                 headers['X-Checkpoint-Token'] = claim.json()['checkpoint_token']
                 if with_quota:
@@ -71,10 +76,6 @@ def test_machine_role_runs_checkpoint_delivery_without_reading_other_results(mon
                     assert credential.json() == {'api_key': 'trial-test-key'}
                     assert client.post(base + '/provider-start', headers=headers).status_code == 200
                 event = {'schema_version':'1', 'job_id':job_id, 'attempt_id':attempt, 'event_id':'terminal', 'status':'completed', 'result':{'contract_data':{'contract_name':'Example'}, 'parties_data':[]}}
-                if not with_quota:
-                    assert client.post(base + '/checkpoint', headers=headers, json=event).status_code == 409
-                    event.pop('result')
-                    event.update(status='failed', error={'code': 'PREPARATION_FAILED', 'message': 'No reservation.', 'retryable': False})
                 stored = client.post(base + '/checkpoint', headers=headers, json=event)
                 assert stored.status_code == 200, stored.text
                 delivered = client.post(base + '/deliver', headers=headers)

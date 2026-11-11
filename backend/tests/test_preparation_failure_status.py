@@ -1,4 +1,5 @@
 """Public status and retry contract for failures before provider execution."""
+import base64
 from uuid import uuid4
 
 import pytest
@@ -13,6 +14,12 @@ def failed_job(as_org, db_session, monkeypatch):
     def create(retryable=True):
         org = "preparation-ui-" + uuid4().hex
         monkeypatch.setattr(settings, "CLOUDFLARE_TRIAL_ENABLED", True)
+        monkeypatch.setattr(settings, "CLOUDFLARE_ENABLED", True)
+        monkeypatch.setattr(settings, "EXTRACTION_QUOTA_ENABLED", True)
+        monkeypatch.setattr(settings, "EXTRACTION_GLOBAL_TRIAL_MONTHLY_LIMIT", 100)
+        monkeypatch.setattr(settings, "EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT", 100)
+        monkeypatch.setattr(settings, "LANDINGAI_TRIAL_API_KEY", "synthetic-test-key")
+        monkeypatch.setattr(settings, "PROVIDER_CREDENTIAL_ENCRYPTION_KEY", base64.urlsafe_b64encode(b"x" * 32).decode())
         monkeypatch.setattr(settings, "TRIAL_ALLOWED_ORGANIZATION_IDS", [org])
         client = as_org(org)
         assert client.post("/api/provider-credentials/landingai/acknowledgment").status_code == 200
@@ -73,10 +80,7 @@ def test_legacy_failure_status_cannot_retry(client, db_session):
 ])
 def test_retry_quota_denials_are_read_only_and_shared_with_post(failed_job, db_session, monkeypatch, limit):
     from sqlalchemy import text
-    from app.services.extraction_quota import reserve_extraction, settle_extraction
     client, job, old_attempt = failed_job()
-    reserve_extraction(db_session, job.org_id, old_attempt, has_customer_key=False, global_trial_limit=100)
-    settle_extraction(db_session, job.org_id, old_attempt, success=False)
     db_session.commit()
     monkeypatch.setattr(settings, "EXTRACTION_QUOTA_ENABLED", True)
     monkeypatch.setattr(settings, "EXTRACTION_GLOBAL_TRIAL_MONTHLY_LIMIT", 100)
