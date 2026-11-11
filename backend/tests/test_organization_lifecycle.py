@@ -167,6 +167,7 @@ def test_members_can_read_lifecycle_and_reach_leave_while_closing(org_client, mo
     assert org_client.post(BASE + '/cancel-closure').status_code == 403
     def unavailable():
         raise HTTPException(409, 'Leave path reached')
+    monkeypatch.setattr(members.settings, 'WORKOS_API_KEY', 'dummy-key')
     monkeypatch.setattr(members, '_workos_client', unavailable)
     assert org_client.post('/api/members/me/leave').status_code == 409
 

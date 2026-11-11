@@ -1,10 +1,15 @@
+from datetime import datetime
+
 from fastapi import Depends, HTTPException, Request
+from pydantic import TypeAdapter
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.auth import CurrentUser, get_current_user
 from app.db.database import get_db
 from app.models.organization_lifecycle import OrganizationLifecycle
+
+_DATETIME = TypeAdapter(datetime)
 
 EXEMPT_ROUTES = {
     ('GET', '/api/organization/lifecycle'),
@@ -24,4 +29,4 @@ def require_active_organization(request: Request, user: CurrentUser = Depends(ge
     row = db.get(OrganizationLifecycle, user.org_id, populate_existing=True)
     if row and row.status != 'active':
         raise HTTPException(423, {'code': 'ORGANIZATION_CLOSING' if row.status == 'closing' else 'ORGANIZATION_PURGED',
-                                 'purge_after': row.purge_after.isoformat() if row.purge_after else None})
+                                 'purge_after': _DATETIME.dump_python(row.purge_after, mode='json') if row.purge_after else None})
