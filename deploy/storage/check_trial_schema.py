@@ -31,7 +31,7 @@ def main() -> None:
             print(f"reink_app can execute {len(leaked)} of {len(functions)} definer functions:", leaked)
         paths = {tuple(r[0] or []) for r in q(f"SELECT proconfig FROM pg_proc WHERE oid IN ({DEFINER})")}
         print("definer search_path settings:", sorted(paths))
-        for role in ("reink_cf_machine", "reink_cf_dispatch", "reink_cf_expiry", "reink_cf_cleanup", "reink_cf_auditor"):
+        for role in ("reink_cf_machine", "reink_cf_dispatch", "reink_cf_expiry", "reink_cf_cleanup", "reink_cf_purge", "reink_cf_auditor"):
             row = q("SELECT rolcanlogin, rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolreplication "
                     "FROM pg_roles WHERE rolname = %s", role)
             print(f"role {role}:", "absent" if not row else f"login={row[0][0]} privileged={row[0][1]}")

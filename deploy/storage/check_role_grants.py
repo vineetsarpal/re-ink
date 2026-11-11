@@ -3,7 +3,7 @@ import os
 
 import psycopg
 
-ROLES = ("reink_cf_machine", "reink_cf_dispatch", "reink_cf_expiry", "reink_cf_cleanup")
+ROLES = ("reink_cf_machine", "reink_cf_dispatch", "reink_cf_expiry", "reink_cf_cleanup", "reink_cf_purge")
 
 
 def main() -> None:
