@@ -31,6 +31,8 @@ Every queue-path request has an `AbortSignal.timeout`: 15 s for backend JSON cal
 - Credential and document fetches are retried in the same invocation (3 attempts, 250 ms / 1 s) on network errors, timeouts, 429 and 5xx. Other statuses, such as 409 for an inactive attempt, are not retried.
 - The claim has already spent the one-shot token and counted any trial start, so a redelivery could never start this attempt again. A persistent failure before the provider call is therefore checkpointed as `PREPARATION_FAILED` (with `retryable: true` when it was transient) instead of using `retry()`, which would only leave the attempt stuck until expiry.
 - LandingAI calls are never retried; any failure after the provider request starts is checkpointed as `EXTRACTION_FAILED`.
+- Every request uses `redirect: 'manual'` and accepts only status 200, so redirects are never followed. Workers does not implement the Fetch `error` redirect mode: it throws a `TypeError` before sending, which Node does not reproduce.
+- Scheduled failures log one JSON line per failed route (`route` plus HTTP `status` or error type), never tokens or response bodies. View them with `wrangler tail reink-extraction`.
 
 The backend sizes the machine-route database pool per process with `CLOUDFLARE_MACHINE_POOL_SIZE` (default 2), `CLOUDFLARE_MACHINE_POOL_MAX_OVERFLOW` (default 1) and `CLOUDFLARE_MACHINE_POOL_TIMEOUT_SECONDS` (default 5). The defaults suit `max_concurrency = 1`, with room for a retry that overlaps a request the Worker abandoned on timeout. Raise them in step with `max_concurrency`, within the database's connection limit. Validate the live provider response against the backend contract before enabling the trial.
 

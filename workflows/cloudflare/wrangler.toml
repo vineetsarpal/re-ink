@@ -1,5 +1,5 @@
-# Production worker. Queue consumer and cron stay disabled until validation;
-# see README "Deployment preparation". Secrets are set with `wrangler secret put`.
+# Production worker. Consumer and cron enabled 2026-11-11 for synthetic validation
+# (trial restricted to TRIAL_ALLOWED_ORGANIZATION_IDS). Secrets via `wrangler secret put`.
 name = "reink-extraction"
 main = "worker.mjs"
 compatibility_date = "2025-07-09"
@@ -12,17 +12,15 @@ LANDINGAI_PARSE_MODEL = "dpt-2-20260903"
 LANDINGAI_EXTRACT_MODEL = "extract-20260903"
 
 [triggers]
-crons = []
-# After validation: crons = ["* * * * *"]
+crons = ["* * * * *"]
 
-# After validation, enable the consumer:
-# [[queues.consumers]]
-# queue = "reink-extraction"
-# dead_letter_queue = "reink-extraction-dlq"
-# max_batch_size = 1
-# max_concurrency = 1
-# max_retries = 50
-# retry_delay = 30
+[[queues.consumers]]
+queue = "reink-extraction"
+dead_letter_queue = "reink-extraction-dlq"
+max_batch_size = 1
+max_concurrency = 1
+max_retries = 50
+retry_delay = 30
 
 # Secrets (never in this file): REINK_WORKER_TOKEN, REINK_DISPATCH_SCHEDULER_TOKEN,
 # REINK_EXPIRY_SCHEDULER_TOKEN, REINK_CLEANUP_SCHEDULER_TOKEN.

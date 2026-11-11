@@ -77,7 +77,7 @@ function services(env, fetchImpl, { sleep = wait } = {}) {
   const config = settings(env);
   const endpoint = (dispatch, action) => `${config.origin}/api/cloudflare/jobs/${encodeURIComponent(dispatch.job_id)}/attempts/${encodeURIComponent(dispatch.attempt_id)}/${action}`;
   const call = (dispatch, action, { timeout = BACKEND_TIMEOUT_MS, ...options } = {}) => fetchImpl(endpoint(dispatch, action), {
-    ...options, redirect: 'error', signal: AbortSignal.timeout(timeout), headers: { Authorization: `Bearer ${config.token}`, 'X-Dispatch-Capability': dispatch.capability, ...options.headers },
+    ...options, redirect: 'manual', signal: AbortSignal.timeout(timeout), headers: { Authorization: `Bearer ${config.token}`, 'X-Dispatch-Capability': dispatch.capability, ...options.headers },
   });
   return {
     async claim(dispatch) { return readJson(await call(dispatch, 'claim', { method: 'POST' }), 16384); },
@@ -130,23 +130,34 @@ export async function runQueue(batch, env, fetchImpl = fetch, options = {}) {
   await consumeBatch(batch, adapter, options);
 }
 
-export async function runScheduled(env, fetchImpl = fetch) {
+export async function runScheduled(env, fetchImpl = fetch, log = console.error) {
+  const fail = (detail) => { log(JSON.stringify({ event: 'maintenance_failed', ...detail })); };
   let origin;
-  try { origin = trustedOrigin(env.REINK_API_ORIGIN); } catch { throw new Error('MAINTENANCE_FAILED'); }
+  try { origin = trustedOrigin(env.REINK_API_ORIGIN); } catch { fail({ reason: 'INVALID_ORIGIN' }); throw new Error('MAINTENANCE_FAILED'); }
   const dispatch = env.REINK_DISPATCH_SCHEDULER_TOKEN;
   const expiry = env.REINK_EXPIRY_SCHEDULER_TOKEN;
   const cleanup = env.REINK_CLEANUP_SCHEDULER_TOKEN;
-  if ([dispatch, expiry, cleanup].some(value => typeof value !== 'string' || value.length < 32) || new Set([dispatch, expiry, cleanup]).size !== 3) throw new Error('MAINTENANCE_FAILED');
+  if ([dispatch, expiry, cleanup].some(value => typeof value !== 'string' || value.length < 32) || new Set([dispatch, expiry, cleanup]).size !== 3) {
+    fail({ reason: 'INVALID_SECRETS' });
+    throw new Error('MAINTENANCE_FAILED');
+  }
   const requests = [
     ['/api/maintenance/cloudflare-dispatch', dispatch, 'attempted'],
     ['/api/maintenance/expiry', expiry, 'processed'],
     ['/api/maintenance/cleanup', cleanup, 'processed'],
   ];
   const results = await Promise.allSettled(requests.map(async ([path, token, field]) => {
-    const response = await fetchImpl(origin + path, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(45000), headers: { Authorization: `Bearer ${token}` } });
+    const response = await fetchImpl(origin + path, { method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(45000), headers: { Authorization: `Bearer ${token}` } });
     const result = await readJson(response, 16384);
     if (!Number.isSafeInteger(result[field]) || result[field] < 0) throw new Error('INVALID_RESPONSE');
   }));
+  // Route plus HTTP status or error type only; messages may carry backend detail.
+  results.forEach((result, index) => {
+    if (result.status !== 'rejected') return;
+    const route = requests[index][0].split('/').pop();
+    const reason = result.reason;
+    fail(reason instanceof RemoteError ? { route, status: reason.status } : { route, error: reason?.name || 'Error' });
+  });
   if (results.some(result => result.status === 'rejected')) throw new Error('MAINTENANCE_FAILED');
 }
 
