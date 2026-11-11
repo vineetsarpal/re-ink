@@ -5,10 +5,15 @@ from app.api.endpoints import (
     admin,
     agents,
     contracts,
+    cloudflare,
+    cloudflare_dispatch_maintenance,
+    expiry_maintenance,
+    cleanup_maintenance,
     documents,
     members,
     onboarding,
     parties,
+    provider_credentials,
     review,
     system,
     widgets,
@@ -17,9 +22,17 @@ from app.core.auth import get_current_user
 
 api_router = APIRouter()
 
+# Machine routes authenticate independently and remain disabled by default.
+api_router.include_router(cloudflare.router)
+api_router.include_router(cloudflare_dispatch_maintenance.router)
+api_router.include_router(expiry_maintenance.router)
+api_router.include_router(cleanup_maintenance.router)
+
 # Every resource router requires a valid WorkOS access token. The public
 # endpoints (`/` and `/health`) live in app.main, outside this router.
 _auth = [Depends(get_current_user)]
+
+api_router.include_router(provider_credentials.router, prefix="/provider-credentials", dependencies=_auth)
 
 # Include all endpoint routers
 api_router.include_router(

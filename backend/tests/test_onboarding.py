@@ -9,6 +9,9 @@ The WorkOS client is stubbed — no network.
 from __future__ import annotations
 
 from unittest.mock import MagicMock
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event, Lock
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -38,6 +41,7 @@ def test_provision_creates_dedicated_org_named_after_email(orgless_user, monkeyp
     wos = MagicMock()
     wos.organization_membership.list_organization_memberships.return_value.data = []
     wos.user_management.get_user.return_value.email = "alice@acme.com"
+    wos.user_management.get_user.return_value.email_verified = True
     wos.organizations.list_organizations.return_value.data = []
     wos.organizations.create_organization.return_value.id = "org_new123"
     monkeypatch.setattr(onboarding, "_workos_client", lambda: wos)
@@ -65,6 +69,7 @@ def test_provision_joins_single_verified_domain_match_as_viewer(
     wos = MagicMock()
     wos.organization_membership.list_organization_memberships.return_value.data = []
     wos.user_management.get_user.return_value.email = "alice@acme.com"
+    wos.user_management.get_user.return_value.email_verified = True
     wos.organizations.list_organizations.return_value.data = [org]
     monkeypatch.setattr(onboarding, "_workos_client", lambda: wos)
 
@@ -77,6 +82,20 @@ def test_provision_joins_single_verified_domain_match_as_viewer(
     wos.organization_membership.create_organization_membership.assert_called_once_with(
         user_id="user_new", organization_id="org_acme", role="viewer"
     )
+
+
+def test_unverified_email_cannot_provision_or_join_an_organization(orgless_user, monkeypatch):
+    wos = MagicMock()
+    wos.organization_membership.list_organization_memberships.return_value.data = []
+    wos.user_management.get_user.return_value.email = "alice@acme.com"
+    wos.user_management.get_user.return_value.email_verified = False
+    monkeypatch.setattr(onboarding, "_workos_client", lambda: wos)
+
+    response = TestClient(app).post(PROVISION_PATH)
+
+    assert response.status_code == 403
+    wos.organizations.create_organization.assert_not_called()
+    wos.organization_membership.create_organization_membership.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -102,6 +121,7 @@ def test_provision_falls_back_to_solo_admin_org_without_one_verified_domain_matc
     wos = MagicMock()
     wos.organization_membership.list_organization_memberships.return_value.data = []
     wos.user_management.get_user.return_value.email = "alice@acme.com"
+    wos.user_management.get_user.return_value.email_verified = True
     wos.organizations.list_organizations.return_value.data = orgs
     wos.organizations.create_organization.return_value.id = expected_org_id
     monkeypatch.setattr(onboarding, "_workos_client", lambda: wos)
@@ -131,6 +151,53 @@ def test_provision_is_idempotent_for_existing_member(orgless_user, monkeypatch):
     assert resp.json()["organization_id"] == "org_existing"
     wos.organizations.create_organization.assert_not_called()
     wos.organization_membership.create_organization_membership.assert_not_called()
+
+
+def test_concurrent_first_requests_create_only_one_organization(orgless_user, monkeypatch):
+    wos = MagicMock()
+    first_lookup = Event()
+    second_lookup = Event()
+    state_lock = Lock()
+    memberships = []
+    lookups = 0
+
+    def list_memberships(**_kwargs):
+        nonlocal lookups
+        with state_lock:
+            lookups += 1
+            number = lookups
+            snapshot = list(memberships)
+        if number == 1:
+            first_lookup.set()
+            second_lookup.wait(1)
+        else:
+            second_lookup.set()
+        return SimpleNamespace(data=snapshot)
+
+    def create_membership(**kwargs):
+        with state_lock:
+            memberships.append(SimpleNamespace(organization_id=kwargs["organization_id"]))
+
+    wos.organization_membership.list_organization_memberships.side_effect = list_memberships
+    wos.organization_membership.create_organization_membership.side_effect = create_membership
+    wos.user_management.get_user.return_value.email = "alice@acme.com"
+    wos.user_management.get_user.return_value.email_verified = True
+    wos.organizations.list_organizations.return_value.data = []
+    wos.organizations.create_organization.return_value.id = "org_new123"
+    monkeypatch.setattr(onboarding, "_workos_client", lambda: wos)
+
+    def request():
+        return TestClient(app).post(PROVISION_PATH)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(request)
+        assert first_lookup.wait(3)
+        second = executor.submit(request)
+        responses = [first.result(timeout=5), second.result(timeout=5)]
+
+    assert [response.json()["organization_id"] for response in responses] == ["org_new123"] * 2
+    wos.organizations.create_organization.assert_called_once()
+    wos.organization_membership.create_organization_membership.assert_called_once()
 
 
 def test_provision_requires_authentication():

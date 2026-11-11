@@ -9,6 +9,7 @@ import { ReviewForm } from '@/components/ReviewForm';
 import {
   agentApi,
   documentApi,
+  providerCredentialApi,
   systemApi,
   type DocumentFileSource,
 } from '@/services/api';
@@ -58,6 +59,13 @@ export const UploadPage: React.FC = () => {
   const [intakeError, setIntakeError] = useState<string | null>(null);
   const lastAgentJobId = useRef<string | null>(null);
   const [isOfflineMode, setIsOfflineMode] = useState(false);
+  const [trialMode, setTrialMode] = useState(false);
+  const [configState, setConfigState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [trialRouting, setTrialRouting] = useState(false);
+  const [acknowledged, setAcknowledged] = useState<boolean | null>(null);
+  const [noticeError, setNoticeError] = useState(false);
+  const [noticeBusy, setNoticeBusy] = useState(false);
+  const [usage, setUsage] = useState<Awaited<ReturnType<typeof documentApi.usage>> | null>(null);
 
   const handleUploadSuccess = (response: DocumentUploadResponse) => {
     setUploadResponse(response);
@@ -155,9 +163,19 @@ export const UploadPage: React.FC = () => {
   useEffect(() => {
     systemApi
       .getConfig()
-      .then((config) => setIsOfflineMode(config.agent_offline_mode))
+      .then((config) => {
+        setIsOfflineMode(config.agent_offline_mode);
+        setTrialMode(config.provider_credentials_enabled);
+        setTrialRouting(config.trial_routing_enabled);
+        setConfigState('ready');
+        if (config.provider_credentials_enabled) {
+          providerCredentialApi.getAcknowledgment().then((result) => setAcknowledged(result.acknowledged)).catch(() => setNoticeError(true));
+          documentApi.usage().then(setUsage).catch(() => setUsage(null));
+        }
+      })
       .catch((error) => {
         console.error('Failed to load system configuration', error);
+        setConfigState('error');
       });
   }, []);
 
@@ -217,10 +235,24 @@ export const UploadPage: React.FC = () => {
       <div className="step-content">
         {currentStep === 'upload' && (
           <>
-            <FileUpload
+            {trialMode && usage && <p>{usage.monthly_successes} of {usage.monthly_limit} monthly extractions used; {usage.free_remaining} free trial extractions remain.</p>}
+            {trialMode && noticeError && <p role="alert">Unable to load or save the processing acknowledgment. Please refresh and try again.</p>}
+            {trialMode && !noticeError && acknowledged === null && <p>Checking processing acknowledgment…</p>}
+            {trialMode && !noticeError && acknowledged === false && <section className="members-card">
+              <h2>Document processing</h2><p>When you extract a document, re-ink sends it to LandingAI for processing.</p>
+              <button className="btn btn-primary" type="button" disabled={noticeBusy} onClick={() => {
+                setNoticeBusy(true);
+                providerCredentialApi.acknowledge().then((result) => setAcknowledged(result.acknowledged)).catch(() => setNoticeError(true)).finally(() => setNoticeBusy(false));
+              }}>I understand and agree</button>
+            </section>}
+            {configState === 'loading' && <p>Loading upload settings…</p>}
+            {configState === 'error' && <p role="alert">Unable to load upload settings. Please refresh and try again.</p>}
+            {configState === 'ready' && trialRouting && !trialMode && <p role="alert">Document extraction is not available for your organization yet.</p>}
+            {configState === 'ready' && (!trialRouting || (trialMode && acknowledged === true)) && <FileUpload
+              trialMode={trialMode}
               onUploadSuccess={handleUploadSuccess}
               onUploadError={(error) => alert(error)}
-            />
+            />}
             {isOfflineMode && (
               <>
                 <p className="sample-documents__label" style={{ marginTop: '2.5rem', textAlign: 'center' }}>Or use a sample extraction</p>
@@ -246,6 +278,7 @@ export const UploadPage: React.FC = () => {
         {currentStep === 'processing' && uploadResponse && (
           <ExtractionStatus
             jobId={uploadResponse.job_id}
+            allowRetry={trialMode && !isMockJob}
             onComplete={handleExtractionComplete}
             onError={(error) => {
               alert(error);

@@ -32,11 +32,13 @@ const ALLOWED_TYPES = [
 ];
 
 interface FileUploadProps {
+  trialMode?: boolean;
   onUploadSuccess?: (response: DocumentUploadResponse) => void;
   onUploadError?: (error: string) => void;
 }
 
 export const FileUpload: React.FC<FileUploadProps> = ({
+  trialMode = false,
   onUploadSuccess,
   onUploadError,
 }) => {
@@ -54,13 +56,14 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     }
 
     // 50MB limit
-    if (file.size > 50 * 1024 * 1024) {
-      setError('File size must be less than 50MB');
+    const maxSize = trialMode ? 5 : 50;
+    if (file.size > maxSize * 1024 * 1024) {
+      setError(`File size must be less than ${maxSize}MB`);
       return false;
     }
 
     return true;
-  }, []);
+  }, [trialMode]);
 
   const handleFileSelect = useCallback((file: File) => {
     setError(null);
@@ -116,7 +119,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     setError(null);
 
     try {
-      const response = await documentApi.upload(selectedFile, apiKey.trim() || undefined);
+      const response = await documentApi.upload(selectedFile, trialMode ? undefined : apiKey.trim() || undefined);
       onUploadSuccess?.(response);
       setSelectedFile(null);
       setApiKey('');
@@ -132,7 +135,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
   return (
     <div className="file-upload-container">
       {/* API Key input */}
-      <div className="api-key-section">
+      {!trialMode && <div className="api-key-section">
         <label className="api-key-label" htmlFor="landingai-api-key">
           <KeyRound size={16} />
           LandingAI API Key
@@ -170,7 +173,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
             Get your LandingAI API key →
           </a>
         </p>
-      </div>
+      </div>}
 
       <div
         className={`upload-dropzone ${isDragging ? 'dragging' : ''} ${
@@ -194,7 +197,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
             <p className="prompt-text">
               Drag and drop your contract document here, or click to browse
             </p>
-            <p className="file-types">Supported formats: PDF, DOCX (Max 50MB)</p>
+            <p className="file-types">Supported formats: PDF, DOCX (Max {trialMode ? 5 : 50}MB)</p>
           </div>
         )}
 

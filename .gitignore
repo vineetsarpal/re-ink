@@ -74,3 +74,6 @@ alembic/versions/*.pyc
 # Promo
 promo/
 renders/
+
+# FastAPI Cloud per-machine app link
+backend/.fastapicloud/

@@ -5,6 +5,9 @@ from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, B
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime, timezone
+from types import SimpleNamespace
+from urllib.parse import quote
+from starlette.concurrency import run_in_threadpool
 import logging
 
 from app.core.config import settings
@@ -21,6 +24,12 @@ from app.schemas.document import (
 from app.services.document_service import document_service
 from app.services.landingai_service import landingai_service
 from app.models.extraction_job import ExtractionJob
+from app.models.provider_acknowledgment import LANDINGAI_NOTICE_VERSION, ProviderAcknowledgment
+from app.services.private_document_service import private_document_service
+from app.services.workflow_service import create_workflow_job, delete_job, expire_job, precheck_upload, retry_job
+from app.services.upload_intents import begin_upload, complete_upload, discard_upload
+from app.services.extraction_quota import quota_usage
+from app.api.endpoints import provider_credentials
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -35,6 +44,78 @@ def _require_document_access_for_job(job: Optional[ExtractionJob], user: Current
     """Allow mock jobs for authenticated tenant users; protect real uploads by role."""
     if "document:upload" not in user.permissions and not (job and _is_mock_job(job)):
         raise HTTPException(status_code=403, detail="Permission denied")
+
+
+@router.get("/usage")
+def extraction_usage(db: Session = Depends(get_tenant_db),
+                     user: CurrentUser = Depends(require_permission("document:upload"))):
+    provider_credentials.require_credentials_available(user)
+    timestamp = datetime.now(timezone.utc)
+    reset = datetime(timestamp.year + (timestamp.month == 12), timestamp.month % 12 + 1, 1, tzinfo=timezone.utc)
+    usage = quota_usage(db, user.org_id, at=timestamp)
+    return {"monthly_successes": usage.monthly_successes, "monthly_pending": usage.pending,
+            "monthly_limit": settings.EXTRACTION_MONTHLY_LIMIT,
+            "free_remaining": max(0, settings.EXTRACTION_FREE_LIMIT - usage.free_successes - usage.free_pending),
+            "resets_at": reset.isoformat()}
+
+
+async def _upload_trial(file: UploadFile, db: Session, user: CurrentUser):
+    provider_credentials.require_credentials_available(user)
+    if "document:upload" not in user.permissions:
+        raise HTTPException(403, "Permission denied")
+    notice = db.get(ProviderAcknowledgment, (user.org_id, "landingai"))
+    if not notice or notice.notice_version != LANDINGAI_NOTICE_VERSION:
+        raise HTTPException(403, "Acknowledge LandingAI processing before uploading")
+    try:
+        precheck_upload(db, user.org_id)
+    except HTTPException:
+        db.commit()
+        raise
+    db.commit()
+
+    def prepare_intent(job_id, key):
+        try:
+            begin_upload(db, user.org_id, job_id, key)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise HTTPException(503, "Document could not be queued") from None
+
+    file_info = await private_document_service.save_uploaded_file(file, user.org_id, before_store=prepare_intent)
+    committing = False
+    try:
+        job = create_workflow_job(db, file_info, user.org_id)
+        complete_upload(db, user.org_id, file_info["job_id"], file_info["storage_key"])
+        response = DocumentUploadResponse(job_id=job.job_id, filename=job.filename, file_path="",
+                                          message=job.message or "Queued for extraction", status=job.status)
+        committing = True
+        db.commit()
+        return response
+    except Exception as exc:
+        db.rollback()
+        safe_to_delete = not committing
+        if committing:
+            try:
+                bind_session_to_org(db, user.org_id)
+                safe_to_delete = db.query(ExtractionJob.job_id).filter_by(job_id=file_info["job_id"]).first() is None
+                db.rollback()
+            except Exception:
+                db.rollback()
+        if safe_to_delete:
+            try:
+                private_document_service.delete_original(file_info["storage_key"])
+            except Exception:
+                logger.error("Upload orphan requires storage reconciliation")
+            else:
+                try:
+                    bind_session_to_org(db, user.org_id)
+                    discard_upload(db, user.org_id, file_info["job_id"], file_info["storage_key"])
+                    db.commit()
+                except Exception:
+                    db.rollback()
+        if isinstance(exc, HTTPException):
+            raise
+        raise HTTPException(503, "Document could not be queued") from None
 
 
 # Temporary: retain authentication and tenant scoping while WorkOS RBAC is repaired.
@@ -55,6 +136,8 @@ async def upload_document(
     3. Initiates extraction job with LandingAI (using provided or server API key)
     4. Returns job ID for status tracking
     """
+    if settings.CLOUDFLARE_TRIAL_ENABLED:
+        return await _upload_trial(file, db, user)
     resolved_key = api_key or settings.LANDINGAI_API_KEY
     if not resolved_key:
         raise HTTPException(
@@ -156,8 +239,12 @@ async def get_extraction_status(
     """
     job = db.query(ExtractionJob).filter(ExtractionJob.job_id == job_id).first()
     _require_document_access_for_job(job, user)
-    if not job:
+    if not job or job.deleted_at:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.selected_attempt_id:
+        job = expire_job(db, job_id)
+        db.commit()
 
     result = None
     if job.status == "completed" and job.parsed_results:
@@ -192,7 +279,7 @@ async def get_extraction_results(
     """
     job = db.query(ExtractionJob).filter(ExtractionJob.job_id == job_id).first()
     _require_document_access_for_job(job, user)
-    if not job:
+    if not job or job.deleted_at:
         raise HTTPException(status_code=404, detail="Job not found")
 
     if job.status != "completed":
@@ -228,11 +315,26 @@ async def get_source_document(
     carry no file on disk) so the frontend can degrade gracefully.
     """
     from fastapi.responses import FileResponse
+    from fastapi.responses import Response
     from pathlib import Path
 
     job = db.query(ExtractionJob).filter(ExtractionJob.job_id == job_id).first()
-    if not job:
+    if not job or job.deleted_at:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.selected_attempt_id:
+        snapshot = SimpleNamespace(**{name: getattr(job, name) for name in (
+            "org_id", "storage_key", "size_bytes", "sha256", "filename", "content_type")})
+        db.commit()
+        content = await run_in_threadpool(private_document_service.read_original, snapshot)
+        job = db.query(ExtractionJob).filter(ExtractionJob.job_id == job_id,
+                                             ExtractionJob.deleted_at.is_(None)).first()
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        filename = quote(snapshot.filename or "document", safe="")
+        return Response(content, media_type=snapshot.content_type,
+                        headers={"Content-Disposition": f"inline; filename*=UTF-8''{filename}",
+                                 "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
     if not job.file_path or not Path(job.file_path).exists():
         raise HTTPException(status_code=404, detail="Source document not available for this job")
@@ -252,6 +354,24 @@ async def get_source_document(
     )
 
 
+@router.post("/{job_id}/retry", response_model=DocumentUploadResponse)
+def retry_document(job_id: str, db: Session = Depends(get_tenant_db),
+                   user: CurrentUser = Depends(require_permission("document:upload"))):
+    provider_credentials.require_credentials_available(user)
+    notice = db.get(ProviderAcknowledgment, (user.org_id, "landingai"))
+    if not notice or notice.notice_version != LANDINGAI_NOTICE_VERSION:
+        raise HTTPException(403, "Acknowledge LandingAI processing before uploading")
+    job = db.query(ExtractionJob).filter(ExtractionJob.job_id == job_id,
+            ExtractionJob.selected_attempt_id.isnot(None), ExtractionJob.deleted_at.is_(None)).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+    job = retry_job(db, job_id)
+    response = DocumentUploadResponse(job_id=job.job_id, filename=job.filename, file_path="",
+                                      message=job.message or "Queued for extraction", status=job.status)
+    db.commit()
+    return response
+
+
 @router.delete("/{job_id}")
 async def delete_document(
     job_id: str,
@@ -262,8 +382,13 @@ async def delete_document(
     Delete a document and its associated extraction data.
     """
     job = db.query(ExtractionJob).filter(ExtractionJob.job_id == job_id).first()
-    if not job:
+    if not job or job.deleted_at:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.selected_attempt_id:
+        delete_job(db, job_id)
+        db.commit()
+        return {"message": "Document access revoked; storage cleanup queued", "cleanup_status": "pending"}
 
     document_service.delete_file(job.file_path)
     db.delete(job)

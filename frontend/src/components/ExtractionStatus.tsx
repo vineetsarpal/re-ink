@@ -11,15 +11,19 @@ interface ExtractionStatusProps {
   jobId: string;
   onComplete?: (status: DocumentExtractionStatus) => void;
   onError?: (error: string) => void;
+  allowRetry?: boolean;
 }
 
 export const ExtractionStatus: React.FC<ExtractionStatusProps> = ({
   jobId,
   onComplete,
   onError,
+  allowRetry = false,
 }) => {
   const [status, setStatus] = useState<DocumentExtractionStatus | null>(null);
   const [isPolling, setIsPolling] = useState(true);
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
 
   useEffect(() => {
     let intervalId: ReturnType<typeof setInterval>;
@@ -33,9 +37,9 @@ export const ExtractionStatus: React.FC<ExtractionStatusProps> = ({
         if (response.status === 'completed') {
           setIsPolling(false);
           onComplete?.(response);
-        } else if (response.status === 'failed') {
+        } else if (response.status === 'failed' || response.status === 'timed_out') {
           setIsPolling(false);
-          onError?.(response.message || 'Extraction failed');
+          if (!allowRetry) onError?.(response.message || 'Extraction failed');
         }
       } catch (err: any) {
         console.error('Error polling status:', err);
@@ -57,7 +61,7 @@ export const ExtractionStatus: React.FC<ExtractionStatusProps> = ({
         clearInterval(intervalId);
       }
     };
-  }, [jobId, isPolling, onComplete, onError]);
+  }, [jobId, isPolling, onComplete, onError, allowRetry]);
 
   const getStatusIcon = () => {
     if (!status) return <Clock size={24} />;
@@ -66,6 +70,7 @@ export const ExtractionStatus: React.FC<ExtractionStatusProps> = ({
       case 'completed':
         return <CheckCircle size={24} className="text-success" />;
       case 'failed':
+      case 'timed_out':
         return <XCircle size={24} className="text-error" />;
       case 'processing':
       case 'submitted_to_ai':
@@ -82,6 +87,7 @@ export const ExtractionStatus: React.FC<ExtractionStatusProps> = ({
       case 'completed':
         return 'Extraction completed successfully!';
       case 'failed':
+      case 'timed_out':
         return status.message || 'Extraction failed';
       case 'processing':
         return 'Processing document...';
@@ -98,6 +104,25 @@ export const ExtractionStatus: React.FC<ExtractionStatusProps> = ({
         {getStatusIcon()}
         <h3>{getStatusMessage()}</h3>
       </div>
+
+      {allowRetry && (status?.status === 'failed' || status?.status === 'timed_out') && (
+        <div>
+          {retryError && <p role="alert">{retryError}</p>}
+          <button type="button" className="btn btn-primary" disabled={retrying} onClick={async () => {
+            setRetrying(true);
+            setRetryError(null);
+            try {
+              await documentApi.retry(jobId);
+              setStatus(null);
+              setIsPolling(true);
+            } catch (err: any) {
+              setRetryError(err.response?.data?.detail || 'Unable to retry extraction');
+            } finally {
+              setRetrying(false);
+            }
+          }}>{retrying ? 'Retrying...' : 'Retry extraction'}</button>
+        </div>
+      )}
 
       {status?.result && status.status === 'completed' && (
         <div className="status-details">
