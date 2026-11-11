@@ -92,3 +92,24 @@ WHERE p.prosecdef AND p.proname LIKE 'reink\_%'
 The migration does not change owner default privileges. A SECURITY DEFINER
 function added by a later migration must revoke access from `reink_app`
 explicitly, or the owner's default privileges should be adjusted separately.
+
+### Production state (2026-11-10)
+
+`0015_trial_hardening` was applied first to `trial-migration-validation`, then
+to production `reink_db`; counts were unchanged and `reink_app` can execute no
+definer function. Login roles `reink_cf_machine`, `reink_cf_dispatch`,
+`reink_cf_expiry` and `reink_cf_cleanup` were created on production with
+`deploy/storage/create_service_roles.py` (passwords in the operator's macOS
+Keychain, service `re-ink neon production reink_db`) and granted with the
+matching `provision_*.py` scripts via `deploy/storage/run_as_owner.py --target
+production`. `deploy/storage/check_role_grants.py` lists their effective
+privileges. `reink_cf_auditor` was not created: nothing calls it yet.
+
+### Service-role connection strings
+
+Each `CLOUDFLARE_*_DATABASE_URL` must use its own role and
+`sslmode=verify-full`, against the same endpoint and database as
+`DATABASE_URL`. If no `sslrootcert` is given, the backend pins the bundled
+`certifi` CA file, because the libpq bundled with `psycopg[binary]` may not
+find the host certificate store (observed on macOS with `sslrootcert=system`).
+An explicit `sslrootcert` in the URL is respected.

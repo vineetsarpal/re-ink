@@ -39,6 +39,7 @@ dependencies = [
     # CORS
     "fastapi-cors>=0.0.6",
     "workos>=8.0.0",
+    "certifi>=2026.2.25",
 ]
 
 [dependency-groups]

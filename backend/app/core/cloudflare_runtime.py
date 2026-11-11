@@ -1,10 +1,13 @@
 """Factories for explicitly separate Cloudflare machine database identities."""
 from functools import lru_cache
 
+import certifi
+
 from fastapi import HTTPException
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
@@ -35,7 +38,10 @@ def require_enabled():
 
 @lru_cache(maxsize=4)
 def _factory(url: str, pool_size: int = 1, max_overflow: int = 0, pool_timeout: int = 2):
-    url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+    url = make_url(url.replace("postgresql://", "postgresql+psycopg://", 1))
+    if url.query.get("sslmode") == "verify-full" and "sslrootcert" not in url.query:
+        # Bundled libpq can't locate the host CA store; pin a known bundle.
+        url = url.update_query_dict({"sslrootcert": certifi.where()})
     engine = create_engine(url, pool_size=pool_size, max_overflow=max_overflow, pool_timeout=pool_timeout,
                            pool_pre_ping=True, connect_args={"connect_timeout": 3})
     return sessionmaker(bind=engine, autoflush=False)
