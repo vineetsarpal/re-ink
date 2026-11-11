@@ -206,6 +206,10 @@ export const membersApi = {
   remove: async (membershipId: string): Promise<void> => {
     await api.delete(`/members/${membershipId}`);
   },
+  leave: async (): Promise<{ account_deleted: boolean }> => {
+    const response = await api.post<{ account_deleted: boolean }>('/members/me/leave');
+    return response.data;
+  },
 };
 
 export type AdminPortalIntent = 'sso' | 'dsync' | 'domain_verification';

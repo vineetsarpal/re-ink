@@ -260,7 +260,11 @@ export const Layout: React.FC = () => {
         </div>
       </main>
 
-      <AccountPanel open={accountOpen} onClose={() => setAccountOpen(false)} />
+      <AccountPanel
+        open={accountOpen}
+        onClose={() => setAccountOpen(false)}
+        onLeaveSuccess={() => signOut()}
+      />
 
       {signOutConfirmOpen && (
         <div
