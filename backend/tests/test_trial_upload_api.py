@@ -1,4 +1,5 @@
 """Public upload behavior for the optional trial path."""
+from conftest import seed_trial_quota
 import base64
 import io
 from uuid import uuid4
@@ -58,7 +59,7 @@ def test_cloudflare_configuration_accepts_neon_pooled_and_direct_connections():
     assert Settings(_env_file=None, **options).CLOUDFLARE_ENABLED
 
 
-def test_trial_upload_requires_notice_and_reserves_free_extraction(as_org, monkeypatch):
+def test_trial_upload_requires_notice_and_reserves_free_extraction(as_org, db_session, monkeypatch):
     from app.api.endpoints import provider_credentials
     import app.services.private_document_service as documents
 
@@ -81,6 +82,7 @@ def test_trial_upload_requires_notice_and_reserves_free_extraction(as_org, monke
     org_id = "upload-" + uuid4().hex
     monkeypatch.setattr(settings, "TRIAL_ALLOWED_ORGANIZATION_IDS", [org_id])
     client = as_org(org_id)
+    seed_trial_quota(db_session, org_id)
     data = io.BytesIO()
     writer = PdfWriter()
     writer.add_blank_page(width=612, height=792)
@@ -148,6 +150,7 @@ def test_five_free_completions_then_customer_key(as_org, db_session, monkeypatch
     org_id = "trial-completion-" + uuid4().hex
     monkeypatch.setattr(settings, "TRIAL_ALLOWED_ORGANIZATION_IDS", [org_id])
     client = as_org(org_id)
+    seed_trial_quota(db_session, org_id)
     connection = db_session.connection()
     def scoped_request():
         with Session(bind=connection, join_transaction_mode="create_savepoint") as session:

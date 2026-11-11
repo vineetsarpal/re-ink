@@ -1,4 +1,5 @@
 """Admission before storage, terminal upload intents, function privileges."""
+from conftest import seed_trial_quota
 import base64
 import importlib.util
 import io
@@ -58,6 +59,7 @@ def trial(as_org, db_session, monkeypatch):
     org_id = "hardening-" + uuid4().hex
     monkeypatch.setattr(settings, "TRIAL_ALLOWED_ORGANIZATION_IDS", [org_id])
     client = as_org(org_id)
+    seed_trial_quota(db_session, org_id)
     connection = db_session.connection()
 
     def scoped_request():

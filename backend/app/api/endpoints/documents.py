@@ -10,6 +10,7 @@ from urllib.parse import quote
 from starlette.concurrency import run_in_threadpool
 import logging
 
+from app.models.provider_credential import ProviderCredential
 from app.core.config import settings
 from app.db.database import SessionLocal
 from app.core.auth import CurrentUser, get_current_user, require_permission
@@ -55,7 +56,9 @@ def extraction_usage(db: Session = Depends(get_tenant_db),
     usage = quota_usage(db, user.org_id, at=timestamp)
     return {"monthly_successes": usage.monthly_successes, "monthly_pending": usage.pending,
             "monthly_limit": settings.EXTRACTION_MONTHLY_LIMIT,
-            "free_remaining": max(0, settings.EXTRACTION_FREE_LIMIT - usage.free_successes - usage.free_pending),
+            "trial_eligible": usage.trial_eligible,
+            "has_customer_key": db.get(ProviderCredential, (user.org_id, "landingai")) is not None,
+            "free_remaining": max(0, settings.EXTRACTION_FREE_LIMIT - usage.free_successes - usage.free_pending) if usage.trial_eligible else 0,
             "resets_at": reset.isoformat()}
 
 

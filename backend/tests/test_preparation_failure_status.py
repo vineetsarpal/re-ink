@@ -1,4 +1,5 @@
 """Public status and retry contract for failures before provider execution."""
+from conftest import seed_trial_quota
 import base64
 from uuid import uuid4
 
@@ -22,6 +23,7 @@ def failed_job(as_org, db_session, monkeypatch):
         monkeypatch.setattr(settings, "PROVIDER_CREDENTIAL_ENCRYPTION_KEY", base64.urlsafe_b64encode(b"x" * 32).decode())
         monkeypatch.setattr(settings, "TRIAL_ALLOWED_ORGANIZATION_IDS", [org])
         client = as_org(org)
+        seed_trial_quota(db_session, org)
         assert client.post("/api/provider-credentials/landingai/acknowledgment").status_code == 200
         job = workflow_service.create_workflow_job(db_session, {
             "job_id": uuid4().hex, "filename": "synthetic.pdf", "storage_key": uuid4().hex,

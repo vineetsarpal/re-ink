@@ -1,3 +1,4 @@
+from conftest import seed_trial_quota
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -18,6 +19,7 @@ from app.services.cloudflare_coordinator import claim_preparation, checkpoint_te
 @pytest.fixture
 def unreserved_attempt(db_session):
     bind_session_to_org(db_session, "org-alpha")
+    seed_trial_quota(db_session, "org-alpha")
     now = datetime.now(timezone.utc)
     db_session.add(ExtractionJob(job_id="job-a", org_id="org-alpha", status="queued", selected_attempt_id="attempt-a"))
     db_session.flush()
@@ -61,6 +63,7 @@ def test_terminal_checkpoint_is_replayed_on_redelivery(attempt):
 
 def test_other_organization_cannot_access_or_claim_job(attempt):
     bind_session_to_org(attempt, "org-beta")
+    seed_trial_quota(attempt, "org-beta")
     with pytest.raises(HTTPException) as exc:
         claim_preparation(attempt, "job-a", "attempt-a")
     assert exc.value.status_code == 404
@@ -89,6 +92,7 @@ def test_concurrent_claims_allow_only_one_provider_call(restricted_engine, prese
     now = datetime.now(timezone.utc)
     with Session(restricted_engine) as session:
         bind_session_to_org(session, org)
+        seed_trial_quota(session, org)
         session.add(ExtractionJob(job_id=job_id, org_id=org, status="queued", selected_attempt_id=attempt_id))
         session.flush()
         session.add(ExtractionAttempt(attempt_id=attempt_id, job_id=job_id, org_id=org, number=1,
@@ -100,6 +104,7 @@ def test_concurrent_claims_allow_only_one_provider_call(restricted_engine, prese
     def claim():
         with Session(restricted_engine) as session:
             bind_session_to_org(session, org)
+            seed_trial_quota(session, org)
             barrier.wait(timeout=5)
             result = claim_preparation(session, job_id, attempt_id)
             session.commit()
@@ -112,6 +117,7 @@ def test_concurrent_claims_allow_only_one_provider_call(restricted_engine, prese
     finally:
         with Session(restricted_engine) as session:
             bind_session_to_org(session, org)
+            seed_trial_quota(session, org)
             for model in (QuotaReservation, OrganizationQuota, ExtractionRate):
                 session.execute(delete(model).where(model.org_id == org))
             session.execute(delete(ExtractionAttempt).where(ExtractionAttempt.attempt_id == attempt_id))
@@ -130,6 +136,7 @@ def test_concurrent_provider_authorizations_count_only_once(restricted_engine, m
     now = datetime.now(timezone.utc)
     with Session(restricted_engine) as session:
         bind_session_to_org(session, org)
+        seed_trial_quota(session, org)
         session.add(ExtractionJob(job_id=job_id, org_id=org, status="queued", selected_attempt_id=attempt_id))
         session.flush()
         session.add(ExtractionAttempt(attempt_id=attempt_id, job_id=job_id, org_id=org, number=1,
@@ -144,6 +151,7 @@ def test_concurrent_provider_authorizations_count_only_once(restricted_engine, m
     def start():
         with Session(restricted_engine) as session:
             bind_session_to_org(session, org)
+            seed_trial_quota(session, org)
             barrier.wait(timeout=5)
             try:
                 assert authorize_provider_start(session, job_id, attempt_id, token)
@@ -158,10 +166,12 @@ def test_concurrent_provider_authorizations_count_only_once(restricted_engine, m
             assert sorted(pool.map(lambda _: start(), range(2))) == [200, 409]
         with Session(restricted_engine) as session:
             bind_session_to_org(session, org)
+            seed_trial_quota(session, org)
             assert session.get(GlobalQuota, 1).trial_starts == before + 1
     finally:
         with Session(restricted_engine) as session:
             bind_session_to_org(session, org)
+            seed_trial_quota(session, org)
             session.execute(delete(QuotaReservation).where(QuotaReservation.attempt_id == attempt_id))
             session.execute(delete(OrganizationQuota).where(OrganizationQuota.org_id == org))
             session.execute(delete(ExtractionRate).where(ExtractionRate.org_id == org))

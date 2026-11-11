@@ -244,3 +244,16 @@ def preserve_global_quota(restricted_engine):
                 for name, value in snapshot.items():
                     setattr(row, name, value)
             db.commit()
+
+
+def seed_trial_quota(db, org_id):
+    """Seed an eligible legacy organization for quota/workflow test scenarios."""
+    from datetime import date
+    from sqlalchemy.dialects.postgresql import insert
+    from app.core.tenancy import bind_session_to_org
+    from app.models.extraction_quota import OrganizationQuota
+
+    bind_session_to_org(db, org_id)
+    db.execute(insert(OrganizationQuota).values(org_id=org_id, trial_eligible=True,
+        month=date(2026, 11, 1), monthly_successes=0, monthly_attempts=0,
+        pending=0, free_successes=0, free_pending=0).on_conflict_do_nothing())

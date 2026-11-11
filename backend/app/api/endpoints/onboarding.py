@@ -16,6 +16,7 @@ from workos import WorkOSClient
 from app.core.auth import CurrentUser, get_authenticated_user
 from app.core.config import settings
 from app.db.database import get_db
+from app.services.trial_eligibility import assign_trial_eligibility
 
 router = APIRouter()
 
@@ -101,8 +102,12 @@ def provision_organization(
             )
             return ProvisionOrganizationResponse(organization_id=org.id)
 
+    if not settings.TRIAL_IDENTITY_HASH_KEY:
+        raise HTTPException(503, "Trial eligibility is not configured on this server.")
     org = client.organizations.create_organization(name=workos_user.email)
     client.organization_membership.create_organization_membership(
         user_id=user.user_id, organization_id=org.id, role="admin"
     )
+    assign_trial_eligibility(db, org.id, user.user_id, workos_user.email)
+    db.commit()
     return ProvisionOrganizationResponse(organization_id=org.id)

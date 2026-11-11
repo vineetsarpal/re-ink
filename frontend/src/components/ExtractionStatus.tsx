@@ -1,3 +1,4 @@
+import { extractionErrorMessage } from '@/types/extractionErrors';
 import { PREPARATION_FAILED, TRIAL_CAPACITY_UNAVAILABLE } from '@/types/extractionErrors';
 /**
  * ExtractionStatus component for displaying document extraction progress.
@@ -13,6 +14,8 @@ interface ExtractionStatusProps {
   onComplete?: (status: DocumentExtractionStatus) => void;
   onError?: (error: string) => void;
   allowRetry?: boolean;
+  trialEligible?: boolean;
+  hasCustomerKey?: boolean;
 }
 
 export const ExtractionStatus: React.FC<ExtractionStatusProps> = ({
@@ -20,6 +23,8 @@ export const ExtractionStatus: React.FC<ExtractionStatusProps> = ({
   onComplete,
   onError,
   allowRetry = false,
+  trialEligible = true,
+  hasCustomerKey = false,
 }) => {
   const [status, setStatus] = useState<DocumentExtractionStatus | null>(null);
   const [isPolling, setIsPolling] = useState(true);
@@ -44,7 +49,7 @@ export const ExtractionStatus: React.FC<ExtractionStatusProps> = ({
         }
       } catch (err: any) {
         console.error('Error polling status:', err);
-        onError?.(err.response?.data?.detail || 'Failed to get status');
+        onError?.(extractionErrorMessage(err.response?.data?.detail, 'Failed to get status'));
         setIsPolling(false);
       }
     };
@@ -107,6 +112,7 @@ export const ExtractionStatus: React.FC<ExtractionStatusProps> = ({
 
   return (
     <div className="extraction-status">
+      {!trialEligible && !hasCustomerKey && <p role="status">Free extractions are not available for this organization; add a LandingAI key.</p>}
       <div className="status-header">
         {getStatusIcon()}
         <h3>{getStatusMessage()}</h3>
@@ -123,7 +129,7 @@ export const ExtractionStatus: React.FC<ExtractionStatusProps> = ({
               setStatus(null);
               setIsPolling(true);
             } catch (err: any) {
-              setRetryError(err.response?.data?.detail || 'Unable to retry extraction');
+              setRetryError(extractionErrorMessage(err.response?.data?.detail, 'Unable to retry extraction'));
             } finally {
               setRetrying(false);
             }

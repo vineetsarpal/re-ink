@@ -24,6 +24,7 @@ class Usage:
     pending: int
     free_successes: int
     free_pending: int
+    trial_eligible: bool = False
 
 
 def _month(at):
@@ -70,6 +71,8 @@ def _locked_rate(db, org_id, timestamp, per_minute_limit):
 
 
 def _check_limits(global_quota, org, funding, *, global_trial_limit, global_trial_call_limit, monthly_limit, free_limit, attempt_limit):
+    if funding == "trial" and not org.trial_eligible:
+        raise HTTPException(403, {"code": "TRIAL_NOT_ELIGIBLE", "message": "Free extractions are not available for this organization; add a LandingAI key"})
     if org.monthly_successes + org.pending >= monthly_limit:
         raise HTTPException(429, "Monthly extraction limit reached")
     if org.monthly_attempts >= attempt_limit:
@@ -103,6 +106,7 @@ def precheck_extraction(db, org_id, *, has_customer_key, global_trial_limit, glo
         org = SimpleNamespace(**{
             name: getattr(org_row, name) if org_row and (name in {"pending", "free_pending", "free_successes"} or org_row.month >= month) else 0
             for name in ("monthly_successes", "monthly_attempts", "pending", "free_successes", "free_pending")})
+        org.trial_eligible = org_row.trial_eligible if org_row else False
         rate = db.get(ExtractionRate, org_id)
         attempts = rate.attempts if rate and rate.window_start >= timestamp.astimezone(timezone.utc).replace(second=0, microsecond=0) else 0
         if attempts >= per_minute_limit:
@@ -205,4 +209,4 @@ def quota_usage(db, org_id, *, at=None):
         return Usage(0, 0, 0, 0, 0)
     current = org.month >= month
     return Usage(org.monthly_successes if current else 0, org.monthly_attempts if current else 0,
-                 org.pending, org.free_successes, org.free_pending)
+                 org.pending, org.free_successes, org.free_pending, org.trial_eligible)

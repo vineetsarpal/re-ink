@@ -130,6 +130,7 @@ class Settings(BaseSettings):
     R2_BUCKET: str = ""
     R2_REGION: str = "auto"
     R2_ACCESS_KEY_ID: str = Field(default="", repr=False)
+    TRIAL_IDENTITY_HASH_KEY: str = Field(default="", repr=False)
     R2_SECRET_ACCESS_KEY: str = Field(default="", repr=False)
 
     @model_validator(mode="after")

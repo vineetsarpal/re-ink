@@ -1,8 +1,18 @@
 # Production trial setup
 
+Before deploying trial eligibility, set `TRIAL_IDENTITY_HASH_KEY` as a secret in
+FastAPI Cloud. Generate a high-entropy value and retain it across deployments.
+Migration 0017 needs no identity or WorkOS secrets. After migrating, run the
+one-off backfill with the same identity key and migration-owner database URL
+before expanding trial access; see [trial eligibility setup](trial-eligibility.md).
+
 The owner chose the existing production environment for synthetic validation;
-there are no live users. The trial remains disabled until the full setup and
-validation are complete. Existing data must be preserved.
+there were no live users at initial setup. A [read-only check on 2026-11-11 at
+18:37 UTC](trial-rollout-status-2026-11-11.md) confirmed protocol 2 deployed on
+the backend and Worker, trial intake restricted to one allowlisted organization,
+queue delivery enabled, and a configured minute cron. Public-launch readiness
+is not established. Existing data must be preserved. Earlier dated setup notes
+below describe historical state; use the linked snapshot for the latest checks.
 
 The approved initial limits are five successful free extractions per organization
 (lifetime), 50 successful extractions per organization per UTC month, and 100
@@ -45,9 +55,11 @@ branch using dedicated non-login `reink_check_*` roles. The updated cleanup
 role has the required function access without direct upload-intent read access.
 These checks do not provision or verify the production runtime identities.
 
-Before enabling customer access, finish readiness checks, turn on the queue
-consumer and maintenance schedule, and verify storage, paid-call fencing,
-limits, signup controls and synthetic extraction end to end. The customer-key
+Before expanding customer access, finish readiness checks, confirm queue
+delivery and successful maintenance execution, and verify storage, paid-call
+fencing, limits, signup controls and synthetic extraction end to end. Queue
+delivery and the cron configuration were confirmed in the linked snapshot;
+recent maintenance execution outcomes were not checked. The customer-key
 feature is intentionally disabled in the code until that work is complete.
 Account deletion remains disabled pending separate closure safeguards.
 
@@ -115,7 +127,7 @@ Each `CLOUDFLARE_*_DATABASE_URL` must use its own role and
 find the host certificate store (observed on macOS with `sslrootcert=system`).
 An explicit `sslrootcert` in the URL is respected.
 
-### Local follow-ups (2026-11-11)
+### Protocol-2 changes (2026-11-11)
 
 Migration `0016_cleanup_backoff` adds a consecutive cleanup failure counter and
 replaces `reink_finish_expired_upload` with the same signature and ACL. Existing
@@ -127,8 +139,10 @@ The Cloudflare claim now authorizes preparation only. A separate one-shot
 `provider-start` request counts the trial start after document and credential
 fetches succeed, immediately before the provider probe. Existing machine role
 grants cover this operation. Protocol 2 now rejects mismatched pairs before a
-claim can spend a start. Use the coordinated procedure below; these local
-changes have not been deployed.
+claim can spend a start. These changes were subsequently merged and deployed;
+see the [verified rollout snapshot](trial-rollout-status-2026-11-11.md) for
+evidence and remaining checks. The coordinated procedure below records the
+rollout sequence rather than a list of still-pending deployment steps.
 
 Preparation failures settle without spending a global trial start. Failed
 provider calls still count against the global monthly cap of 100. Provider-start

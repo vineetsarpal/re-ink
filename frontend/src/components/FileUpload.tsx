@@ -1,3 +1,4 @@
+import { extractionErrorMessage } from '@/types/extractionErrors';
 /**
  * FileUpload component for uploading reinsurance contract documents.
  * Supports PDF and DOCX formats with drag-and-drop functionality.
@@ -124,7 +125,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
       setSelectedFile(null);
       setApiKey('');
     } catch (err: any) {
-      const errorMessage = err.response?.data?.detail || 'Failed to upload file';
+      const errorMessage = extractionErrorMessage(err.response?.data?.detail, 'Failed to upload file');
       setError(errorMessage);
       onUploadError?.(errorMessage);
     } finally {
