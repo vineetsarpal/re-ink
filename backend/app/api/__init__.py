@@ -9,6 +9,7 @@ from app.api.endpoints import (
     cloudflare_dispatch_maintenance,
     expiry_maintenance,
     cleanup_maintenance,
+    purge_maintenance,
     documents,
     members,
     onboarding,
@@ -29,6 +30,7 @@ api_router.include_router(cloudflare.router)
 api_router.include_router(cloudflare_dispatch_maintenance.router)
 api_router.include_router(expiry_maintenance.router)
 api_router.include_router(cleanup_maintenance.router)
+api_router.include_router(purge_maintenance.router)
 
 # Every resource router requires a valid WorkOS access token. The public
 # endpoints (`/` and `/health`) live in app.main, outside this router.

@@ -21,14 +21,14 @@ def test_incomplete_cloudflare_configuration_cannot_start():
 
 def _cloudflare_options():
     urls = [f"postgresql://{role}@db.neon.tech/reink_db?sslmode=verify-full"
-            for role in ("machine", "dispatch", "expiry", "cleanup")]
+            for role in ("machine", "dispatch", "expiry", "cleanup", "purge")]
     return dict(
         DATABASE_URL="postgresql://app@db.neon.tech/reink_db", CLOUDFLARE_ENABLED=True,
         EXTRACTION_QUOTA_ENABLED=True,
         CLOUDFLARE_MACHINE_DATABASE_URL=urls[0], CLOUDFLARE_DISPATCH_DATABASE_URL=urls[1],
-        CLOUDFLARE_EXPIRY_DATABASE_URL=urls[2], CLOUDFLARE_CLEANUP_DATABASE_URL=urls[3],
+        CLOUDFLARE_EXPIRY_DATABASE_URL=urls[2], CLOUDFLARE_CLEANUP_DATABASE_URL=urls[3], CLOUDFLARE_PURGE_DATABASE_URL=urls[4],
         CLOUDFLARE_MACHINE_TOKEN="a" * 32, CLOUDFLARE_DISPATCH_TOKEN="b" * 32,
-        CLOUDFLARE_EXPIRY_TOKEN="c" * 32, CLOUDFLARE_CLEANUP_TOKEN="d" * 32,
+        CLOUDFLARE_EXPIRY_TOKEN="c" * 32, CLOUDFLARE_CLEANUP_TOKEN="d" * 32, CLOUDFLARE_PURGE_TOKEN="p" * 32,
         CLOUDFLARE_CAPABILITY_KEY=base64.urlsafe_b64encode(b"e" * 32).decode(),
         PROVIDER_CREDENTIAL_ENCRYPTION_KEY=base64.urlsafe_b64encode(b"f" * 32).decode(),
         CLOUDFLARE_ACCOUNT_ID="a" * 32, CLOUDFLARE_QUEUE_ID="b" * 32,
@@ -52,7 +52,7 @@ def test_cloudflare_configuration_accepts_neon_pooled_and_direct_connections():
 
     options = _cloudflare_options()
     options["DATABASE_URL"] = "postgresql://app@ep-test-pooler.c-2.us-east-2.aws.neon.tech/reink_db"
-    for role in ("MACHINE", "DISPATCH", "EXPIRY", "CLEANUP"):
+    for role in ("MACHINE", "DISPATCH", "EXPIRY", "CLEANUP", "PURGE"):
         options[f"CLOUDFLARE_{role}_DATABASE_URL"] = (
             f"postgresql://{role.lower()}@ep-test.c-2.us-east-2.aws.neon.tech/reink_db?sslmode=verify-full"
         )
@@ -116,7 +116,7 @@ def test_trial_mode_cannot_bypass_notice_with_an_api_key(as_org, monkeypatch):
 
 def test_machine_and_maintenance_routes_are_disabled_by_default(client):
     assert client.post("/api/cloudflare/jobs/job/attempts/attempt/claim").status_code == 503
-    for name in ("cloudflare-dispatch", "expiry", "cleanup"):
+    for name in ("cloudflare-dispatch", "expiry", "cleanup", "purge"):
         assert client.post(f"/api/maintenance/{name}").status_code == 503
 
 

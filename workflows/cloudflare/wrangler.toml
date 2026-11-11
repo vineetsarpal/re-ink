@@ -3,7 +3,9 @@
 # and EXTRACTION_UNCAPPED_ORGANIZATION_IDS (customer funding only).
 # Kill switch: backend EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT=0; own keys continue.
 # Production open-access deploy waits on #60 and follow-up checks 1-3.
-# Secrets via `wrangler secret put`.
+# Scheduler secrets: REINK_{DISPATCH,EXPIRY,CLEANUP,PURGE}_SCHEDULER_TOKEN, all distinct.
+# Purge also needs backend CLOUDFLARE_PURGE_TOKEN / CLOUDFLARE_PURGE_DATABASE_URL (reink_cf_purge).
+# Set the purge token on both sides before deploying; secrets via `wrangler secret put`.
 name = "reink-extraction"
 main = "worker.mjs"
 compatibility_date = "2025-07-09"

@@ -56,7 +56,7 @@ def _bound_url(factory):
     return factory().kw["bind"].url
 
 
-@pytest.mark.parametrize("name", ["machine", "dispatch", "expiry", "cleanup"])
+@pytest.mark.parametrize("name", ["machine", "dispatch", "expiry", "cleanup", "purge"])
 def test_verify_full_without_root_cert_uses_bundled_ca(monkeypatch, name):
     import certifi
     monkeypatch.setattr(settings, f"CLOUDFLARE_{name.upper()}_DATABASE_URL",

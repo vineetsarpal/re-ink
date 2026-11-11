@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     CLOUDFLARE_MACHINE_DATABASE_URL: str = Field(default="", repr=False)
     CLOUDFLARE_DISPATCH_DATABASE_URL: str = Field(default="", repr=False)
     CLOUDFLARE_EXPIRY_DATABASE_URL: str = Field(default="", repr=False)
+    CLOUDFLARE_PURGE_DATABASE_URL: str = Field(default="", repr=False)
+    CLOUDFLARE_PURGE_TOKEN: str = Field(default="", repr=False)
+    PURGE_BATCH_LIMIT: int = Field(default=5, ge=1, le=50)
+    PURGE_TIME_BUDGET_SECONDS: float = Field(default=10, gt=0, le=12)
     CLOUDFLARE_CLEANUP_DATABASE_URL: str = Field(default="", repr=False)
     CLOUDFLARE_MACHINE_TOKEN: str = Field(default="", repr=False)
     CLOUDFLARE_DISPATCH_TOKEN: str = Field(default="", repr=False)
@@ -148,22 +152,22 @@ class Settings(BaseSettings):
         try:
             urls = [make_url(value) for value in (self.CLOUDFLARE_MACHINE_DATABASE_URL,
                     self.CLOUDFLARE_DISPATCH_DATABASE_URL, self.CLOUDFLARE_EXPIRY_DATABASE_URL,
-                    self.CLOUDFLARE_CLEANUP_DATABASE_URL)]
+                    self.CLOUDFLARE_CLEANUP_DATABASE_URL, self.CLOUDFLARE_PURGE_DATABASE_URL)]
             app_url = make_url(self.DATABASE_URL)
             app_identity = app_url.username
         except Exception as exc:
             raise ValueError("Invalid Cloudflare database configuration") from exc
         if (not app_identity or any(u.get_backend_name() != "postgresql" or not u.host or not u.username
                                     or u.query.get("sslmode") != "verify-full" for u in urls)
-                or len({app_identity, *(u.username for u in urls)}) != 5):
+                or len({app_identity, *(u.username for u in urls)}) != 6):
             raise ValueError("Cloudflare databases require separate PostgreSQL identities and verified TLS")
         target = _database_target(app_url)
         if (app_url.get_backend_name() != "postgresql" or not target[0] or not target[2]
                 or any(_database_target(url) != target for url in urls)):
             raise ValueError("Cloudflare and application connections must target the same database")
         tokens = (self.CLOUDFLARE_MACHINE_TOKEN, self.CLOUDFLARE_DISPATCH_TOKEN,
-                  self.CLOUDFLARE_EXPIRY_TOKEN, self.CLOUDFLARE_CLEANUP_TOKEN)
-        if len(set(tokens)) != 4 or any(len(s) < 32 or not s.isascii() or any(ord(c) < 33 or ord(c) > 126 for c in s) for s in tokens):
+                  self.CLOUDFLARE_EXPIRY_TOKEN, self.CLOUDFLARE_CLEANUP_TOKEN, self.CLOUDFLARE_PURGE_TOKEN)
+        if len(set(tokens)) != 5 or any(len(s) < 32 or not s.isascii() or any(ord(c) < 33 or ord(c) > 126 for c in s) for s in tokens):
             raise ValueError("Cloudflare machine credentials must be distinct printable secrets")
         signing = _decoded_secret(self.CLOUDFLARE_CAPABILITY_KEY)
         encryption = _decoded_secret(self.PROVIDER_CREDENTIAL_ENCRYPTION_KEY)

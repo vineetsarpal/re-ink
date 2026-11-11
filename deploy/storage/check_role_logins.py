@@ -10,7 +10,7 @@ import certifi
 import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
-ROLES = ("reink_cf_machine", "reink_cf_dispatch", "reink_cf_expiry", "reink_cf_cleanup")
+ROLES = ("reink_cf_machine", "reink_cf_dispatch", "reink_cf_expiry", "reink_cf_cleanup", "reink_cf_purge")
 KEYCHAIN_SERVICE = "re-ink neon production reink_db"
 VARIANTS = {
     "verify-full/system": {"sslmode": "verify-full", "sslrootcert": "system"},

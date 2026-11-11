@@ -70,33 +70,34 @@ test('an oversized document is rejected before any provider call', async () => {
   assert.equal(calls.some(([url]) => url.startsWith('https://api.va.landing.ai/')), false);
 });
 
-test('scheduled maintenance calls three fixed backend endpoints with separate credentials', async () => {
+test('scheduled maintenance calls four fixed backend endpoints with separate credentials', async () => {
   const calls = [];
-  const config = { REINK_API_ORIGIN: env.REINK_API_ORIGIN, REINK_DISPATCH_SCHEDULER_TOKEN: 'd'.repeat(32), REINK_EXPIRY_SCHEDULER_TOKEN: 'e'.repeat(32), REINK_CLEANUP_SCHEDULER_TOKEN: 'c'.repeat(32) };
+  const config = { REINK_API_ORIGIN: env.REINK_API_ORIGIN, REINK_DISPATCH_SCHEDULER_TOKEN: 'd'.repeat(32), REINK_EXPIRY_SCHEDULER_TOKEN: 'e'.repeat(32), REINK_CLEANUP_SCHEDULER_TOKEN: 'c'.repeat(32), REINK_PURGE_SCHEDULER_TOKEN: 'p'.repeat(32) };
   await runScheduled(config, async (url, init) => {
     calls.push([url, init]);
     return json(url.endsWith('/cloudflare-dispatch') ? { attempted: 1 } : { processed: 2 });
   });
-  assert.deepEqual(calls.map(([url]) => url), ['https://api.example.test/api/maintenance/cloudflare-dispatch', 'https://api.example.test/api/maintenance/expiry', 'https://api.example.test/api/maintenance/cleanup']);
+  assert.deepEqual(calls.map(([url]) => url), ['https://api.example.test/api/maintenance/cloudflare-dispatch', 'https://api.example.test/api/maintenance/expiry', 'https://api.example.test/api/maintenance/cleanup', 'https://api.example.test/api/maintenance/purge']);
   assert.equal(calls[0][1].headers.Authorization, `Bearer ${config.REINK_DISPATCH_SCHEDULER_TOKEN}`);
   assert.equal(calls[1][1].headers.Authorization, `Bearer ${config.REINK_EXPIRY_SCHEDULER_TOKEN}`);
   assert.equal(calls[2][1].headers.Authorization, `Bearer ${config.REINK_CLEANUP_SCHEDULER_TOKEN}`);
+  assert.equal(calls[3][1].headers.Authorization, `Bearer ${config.REINK_PURGE_SCHEDULER_TOKEN}`);
   assert.equal(calls.every(([, init]) => init.redirect === 'manual'), true);
 });
 
 test('scheduled maintenance tries expiry and cleanup even if dispatch fails and reports generic failure', async () => {
   const calls = [];
-  const config = { REINK_API_ORIGIN: env.REINK_API_ORIGIN, REINK_DISPATCH_SCHEDULER_TOKEN: 'd'.repeat(32), REINK_EXPIRY_SCHEDULER_TOKEN: 'e'.repeat(32), REINK_CLEANUP_SCHEDULER_TOKEN: 'c'.repeat(32) };
+  const config = { REINK_API_ORIGIN: env.REINK_API_ORIGIN, REINK_DISPATCH_SCHEDULER_TOKEN: 'd'.repeat(32), REINK_EXPIRY_SCHEDULER_TOKEN: 'e'.repeat(32), REINK_CLEANUP_SCHEDULER_TOKEN: 'c'.repeat(32), REINK_PURGE_SCHEDULER_TOKEN: 'p'.repeat(32) };
   await assert.rejects(runScheduled(config, async (url) => {
     calls.push(url);
     if (url.endsWith('/cloudflare-dispatch')) throw new Error('private backend detail');
     return json({ processed: 0 });
   }), error => error.message === 'MAINTENANCE_FAILED');
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4);
 });
 
 test('scheduled maintenance rejects shared scheduler secrets before making requests', async () => {
-  const config = { REINK_API_ORIGIN: env.REINK_API_ORIGIN, REINK_DISPATCH_SCHEDULER_TOKEN: 'd'.repeat(32), REINK_EXPIRY_SCHEDULER_TOKEN: 'e'.repeat(32), REINK_CLEANUP_SCHEDULER_TOKEN: 'e'.repeat(32) };
+  const config = { REINK_API_ORIGIN: env.REINK_API_ORIGIN, REINK_DISPATCH_SCHEDULER_TOKEN: 'd'.repeat(32), REINK_EXPIRY_SCHEDULER_TOKEN: 'e'.repeat(32), REINK_CLEANUP_SCHEDULER_TOKEN: 'e'.repeat(32), REINK_PURGE_SCHEDULER_TOKEN: 'p'.repeat(32) };
   let calls = 0;
   await assert.rejects(runScheduled(config, async () => { calls++; }), /MAINTENANCE_FAILED/);
   assert.equal(calls, 0);
@@ -189,7 +190,7 @@ test('a transient checkpoint failure is retried with the same token and event', 
 });
 
 test('scheduled maintenance logs which route failed with status or error type only', async () => {
-  const config = { REINK_API_ORIGIN: env.REINK_API_ORIGIN, REINK_DISPATCH_SCHEDULER_TOKEN: 'd'.repeat(32), REINK_EXPIRY_SCHEDULER_TOKEN: 'e'.repeat(32), REINK_CLEANUP_SCHEDULER_TOKEN: 'c'.repeat(32) };
+  const config = { REINK_API_ORIGIN: env.REINK_API_ORIGIN, REINK_DISPATCH_SCHEDULER_TOKEN: 'd'.repeat(32), REINK_EXPIRY_SCHEDULER_TOKEN: 'e'.repeat(32), REINK_CLEANUP_SCHEDULER_TOKEN: 'c'.repeat(32), REINK_PURGE_SCHEDULER_TOKEN: 'p'.repeat(32) };
   const lines = [];
   await assert.rejects(runScheduled(config, async (url) => {
     if (url.endsWith('/cloudflare-dispatch')) throw new TypeError('private backend detail');
@@ -205,13 +206,13 @@ test('scheduled maintenance logs which route failed with status or error type on
 
 test('scheduled maintenance logs configuration failures without values', async () => {
   const lines = [];
-  const config = { REINK_API_ORIGIN: env.REINK_API_ORIGIN, REINK_DISPATCH_SCHEDULER_TOKEN: 'short', REINK_EXPIRY_SCHEDULER_TOKEN: 'e'.repeat(32), REINK_CLEANUP_SCHEDULER_TOKEN: 'c'.repeat(32) };
+  const config = { REINK_API_ORIGIN: env.REINK_API_ORIGIN, REINK_DISPATCH_SCHEDULER_TOKEN: 'short', REINK_EXPIRY_SCHEDULER_TOKEN: 'e'.repeat(32), REINK_CLEANUP_SCHEDULER_TOKEN: 'c'.repeat(32), REINK_PURGE_SCHEDULER_TOKEN: 'p'.repeat(32) };
   await assert.rejects(runScheduled(config, async () => json({}), line => lines.push(line)), /MAINTENANCE_FAILED/);
   assert.deepEqual(lines.map(line => JSON.parse(line)), [{ event: 'maintenance_failed', reason: 'INVALID_SECRETS' }]);
 });
 
 test('scheduled maintenance works under the Workers fetch, which rejects redirect "error"', async () => {
-  const config = { REINK_API_ORIGIN: env.REINK_API_ORIGIN, REINK_DISPATCH_SCHEDULER_TOKEN: 'd'.repeat(32), REINK_EXPIRY_SCHEDULER_TOKEN: 'e'.repeat(32), REINK_CLEANUP_SCHEDULER_TOKEN: 'c'.repeat(32) };
+  const config = { REINK_API_ORIGIN: env.REINK_API_ORIGIN, REINK_DISPATCH_SCHEDULER_TOKEN: 'd'.repeat(32), REINK_EXPIRY_SCHEDULER_TOKEN: 'e'.repeat(32), REINK_CLEANUP_SCHEDULER_TOKEN: 'c'.repeat(32), REINK_PURGE_SCHEDULER_TOKEN: 'p'.repeat(32) };
   const workersFetch = async (url, init) => {
     if (init.redirect === 'error') throw new TypeError('Invalid redirect value');
     return json(url.endsWith('/cloudflare-dispatch') ? { attempted: 0 } : { processed: 0 });
@@ -220,7 +221,7 @@ test('scheduled maintenance works under the Workers fetch, which rejects redirec
 });
 
 test('scheduled maintenance treats a redirect as failure instead of following it', async () => {
-  const config = { REINK_API_ORIGIN: env.REINK_API_ORIGIN, REINK_DISPATCH_SCHEDULER_TOKEN: 'd'.repeat(32), REINK_EXPIRY_SCHEDULER_TOKEN: 'e'.repeat(32), REINK_CLEANUP_SCHEDULER_TOKEN: 'c'.repeat(32) };
+  const config = { REINK_API_ORIGIN: env.REINK_API_ORIGIN, REINK_DISPATCH_SCHEDULER_TOKEN: 'd'.repeat(32), REINK_EXPIRY_SCHEDULER_TOKEN: 'e'.repeat(32), REINK_CLEANUP_SCHEDULER_TOKEN: 'c'.repeat(32), REINK_PURGE_SCHEDULER_TOKEN: 'p'.repeat(32) };
   const lines = [];
   await assert.rejects(runScheduled(config, async (url) => url.endsWith('/expiry')
     ? new Response(null, { status: 302, headers: { Location: 'https://elsewhere.example/' } })

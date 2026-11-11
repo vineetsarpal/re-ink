@@ -159,3 +159,34 @@ Prefer keeping 0016 and its revision file in the rollback PR; dropping the
 revision file breaks CI against an already-upgraded DB. The runbook gives the
 optional owner-run downgrade to 0015, ACL/search_path checks and CI hold needed
 to prevent automatic re-upgrade. No provisioning or grant changes are required.
+
+## Organization purge scheduler
+
+The scheduled handler independently calls `/api/maintenance/purge` alongside
+ dispatch, expiry and cleanup. Configure the new, distinct
+`REINK_PURGE_SCHEDULER_TOKEN` with `wrangler secret put` before deploying the
+Worker; one maintenance endpoint failing does not prevent the others running.
+All four scheduler tokens must be distinct, and none belongs in wrangler vars.
+
+Manual production preparation is required before the backend release:
+
+1. Create the dedicated `reink_cf_purge` login using
+   `cd backend && uv run python ../deploy/storage/create_service_roles.py --role reink_cf_purge`.
+2. Apply migration `0021_purge_role` through the normal release workflow. If the
+   role is created afterward, grant its rights with the owner-run
+   `deploy/storage/provision_purge.py reink_cf_purge` helper. RLS remains enabled;
+   the purge binds `app.current_org` instead of using BYPASSRLS.
+3. Set `CLOUDFLARE_PURGE_DATABASE_URL` (same database, distinct role,
+   `sslmode=verify-full`) and `CLOUDFLARE_PURGE_TOKEN` as FastAPI Cloud secrets
+   **before deploying the new backend**. Keep WorkOS API credentials configured.
+4. From the repository root, run
+   `npx wrangler secret put REINK_PURGE_SCHEDULER_TOKEN --config workflows/cloudflare/wrangler.toml`
+   and enter the same new token, then deploy the matched Worker with
+   `npx wrangler deploy --config workflows/cloudflare/wrangler.toml`.
+
+See [organization closure](../../docs/organization-closure.md#scheduled-purge-after-the-grace-period)
+for exact operator commands, least-privilege grants, progress/failure monitoring,
+and the retained accounting tables. Defaults process at most 5 organizations
+within a 10-second start budget per call. The grace deadline is enforced in
+Postgres; active or cancelled closures are never selected. Purge is destructive
+and deployment remains subject to the existing production release gates.

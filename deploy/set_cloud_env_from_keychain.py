@@ -18,11 +18,12 @@ ROLE_SERVICE = "re-ink neon production reink_db"
 DIRECT_HOST = "ep-small-paper-aek1bh55.c-2.us-east-2.aws.neon.tech"
 DATABASE = "reink_db"
 TRIAL_SECRETS = ("CLOUDFLARE_MACHINE_TOKEN", "CLOUDFLARE_DISPATCH_TOKEN", "CLOUDFLARE_EXPIRY_TOKEN",
-                 "CLOUDFLARE_CLEANUP_TOKEN", "CLOUDFLARE_CAPABILITY_KEY", "PROVIDER_CREDENTIAL_ENCRYPTION_KEY")
+                 "CLOUDFLARE_CLEANUP_TOKEN", "CLOUDFLARE_PURGE_TOKEN", "CLOUDFLARE_CAPABILITY_KEY", "PROVIDER_CREDENTIAL_ENCRYPTION_KEY")
 ROLE_URLS = {"CLOUDFLARE_MACHINE_DATABASE_URL": "reink_cf_machine",
              "CLOUDFLARE_DISPATCH_DATABASE_URL": "reink_cf_dispatch",
              "CLOUDFLARE_EXPIRY_DATABASE_URL": "reink_cf_expiry",
-             "CLOUDFLARE_CLEANUP_DATABASE_URL": "reink_cf_cleanup"}
+             "CLOUDFLARE_CLEANUP_DATABASE_URL": "reink_cf_cleanup",
+             "CLOUDFLARE_PURGE_DATABASE_URL": "reink_cf_purge"}
 
 
 def keychain(service: str, account: str) -> str:

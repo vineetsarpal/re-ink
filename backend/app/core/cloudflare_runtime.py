@@ -36,7 +36,7 @@ def require_enabled():
         raise HTTPException(503, "Cloudflare extraction is disabled")
 
 
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=5)
 def _factory(url: str, pool_size: int = 1, max_overflow: int = 0, pool_timeout: int = 2):
     url = make_url(url.replace("postgresql://", "postgresql+psycopg://", 1))
     if url.query.get("sslmode") == "verify-full" and "sslrootcert" not in url.query:
@@ -67,3 +67,8 @@ def expiry_factory():
 def cleanup_factory():
     require_enabled()
     return _factory(settings.CLOUDFLARE_CLEANUP_DATABASE_URL)
+
+
+def purge_factory():
+    require_enabled()
+    return _factory(settings.CLOUDFLARE_PURGE_DATABASE_URL)

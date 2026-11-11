@@ -162,7 +162,8 @@ export async function runScheduled(env, fetchImpl = fetch, log = console.error) 
   const dispatch = env.REINK_DISPATCH_SCHEDULER_TOKEN;
   const expiry = env.REINK_EXPIRY_SCHEDULER_TOKEN;
   const cleanup = env.REINK_CLEANUP_SCHEDULER_TOKEN;
-  if ([dispatch, expiry, cleanup].some(value => typeof value !== 'string' || value.length < 32) || new Set([dispatch, expiry, cleanup]).size !== 3) {
+  const purge = env.REINK_PURGE_SCHEDULER_TOKEN;
+  if ([dispatch, expiry, cleanup, purge].some(value => typeof value !== 'string' || value.length < 32) || new Set([dispatch, expiry, cleanup, purge]).size !== 4) {
     fail({ reason: 'INVALID_SECRETS' });
     throw new Error('MAINTENANCE_FAILED');
   }
@@ -170,6 +171,7 @@ export async function runScheduled(env, fetchImpl = fetch, log = console.error) 
     ['/api/maintenance/cloudflare-dispatch', dispatch, 'attempted'],
     ['/api/maintenance/expiry', expiry, 'processed'],
     ['/api/maintenance/cleanup', cleanup, 'processed'],
+    ['/api/maintenance/purge', purge, 'processed'],
   ];
   const results = await Promise.allSettled(requests.map(async ([path, token, field]) => {
     const response = await fetchImpl(origin + path, { method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(45000), headers: { Authorization: `Bearer ${token}` } });

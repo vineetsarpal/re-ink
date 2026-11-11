@@ -9,6 +9,7 @@ password in the macOS login Keychain. Neon only accepts plaintext passwords
 in CREATE ROLE, so the password travels over the TLS connection and is hashed
 server-side. Grants are applied separately by provision_*.py.
 """
+import argparse
 import getpass
 import secrets
 import subprocess
@@ -19,7 +20,7 @@ import psycopg
 from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
-ROLES = ("reink_cf_machine", "reink_cf_dispatch", "reink_cf_expiry", "reink_cf_cleanup")
+ROLES = ("reink_cf_machine", "reink_cf_dispatch", "reink_cf_expiry", "reink_cf_cleanup", "reink_cf_purge")
 KEYCHAIN_SERVICE = "re-ink neon production reink_db"
 EXPECTED_DB = "reink_db"
 
@@ -44,6 +45,12 @@ def keychain_remove_all() -> None:
 
 
 def main() -> None:
+    global ROLES
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--role', choices=ROLES)
+    args = parser.parse_args()
+    if args.role:
+        ROLES = (args.role,)
     owner_url = getpass.getpass("Direct owner connection URL for production reink_db (hidden): ").strip()
     params = conninfo_to_dict(owner_url)
     host = params.get("host", "")
