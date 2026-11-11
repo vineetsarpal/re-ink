@@ -39,4 +39,19 @@ their normal database configuration.
 Trial-user hashes and normalized work-domain claims have no tenant foreign keys
 and must survive future tenant deletion. Webmail exceptions are reviewed in
 `backend/app/services/webmail_domains.txt`. Joining a verified-domain organization
-does not claim a new trial. The existing organization allowlist is unchanged.
+does not claim a new trial. The organization allowlist is removed; leftover `TRIAL_ALLOWED_ORGANIZATION_IDS`
+in production is ignored (`extra='ignore'`). Access follows the Cloudflare trial
+switch, permissions and acknowledgment. Customer funding uses a 500-success /
+2,000-attempt monthly default; approved uncapped organizations bypass those two
+caps only with a stored customer key. Trial eligibility and per-minute limits
+are unaffected. Set `EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT=0` to stop free
+funding while customer funding continues. See [production setup](trial-production-setup.md)
+for the settings and deployment gate: **#60 and follow-up checks 1–3 must be
+complete before production deployment**.
+
+
+Before production release, manually verify the organization settings page shows
+key management to an admin with `member:manage` in an organization that was never
+listed, and that usage shows “unlimited” only when that organization has a stored
+key and is configured as uncapped. The local verification covers API behavior and
+the frontend build; signed-in browser checks remain part of the deployment gate.

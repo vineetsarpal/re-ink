@@ -1,5 +1,49 @@
 # Cloudflare extraction prototype
 
+## Open access deployment gate
+
+Do not deploy open access to production until **#60 is complete** and follow-up
+checks **1–3** pass: signed-in UI extraction, the `TRIAL_CAPACITY_UNAVAILABLE`
+message, and confirmed scheduled maintenance outcomes. Merging is permitted.
+
+The organization allowlist has been removed. A leftover
+`TRIAL_ALLOWED_ORGANIZATION_IDS` environment variable is harmless because
+settings use `extra='ignore'`; it has no effect and can be removed. All
+organizations can manage keys and extract when `CLOUDFLARE_TRIAL_ENABLED=true`,
+subject to permissions, processing acknowledgment, eligibility, and quotas.
+
+Backend settings (not Worker variables):
+
+```text
+EXTRACTION_MONTHLY_LIMIT=50
+EXTRACTION_MONTHLY_ATTEMPT_LIMIT=200
+EXTRACTION_CUSTOMER_MONTHLY_LIMIT=500
+EXTRACTION_CUSTOMER_MONTHLY_ATTEMPT_LIMIT=2000
+EXTRACTION_UNCAPPED_ORGANIZATION_IDS=[]
+```
+
+The customer attempt default preserves the trial defaults' 4:1 ratio. Configure
+`EXTRACTION_UNCAPPED_ORGANIZATION_IDS` as a JSON array of approved organization
+IDs. Listed organizations skip only monthly success and attempt caps, and only
+while using their own stored key. Trial eligibility, free limits, global trial
+caps, and per-minute rate limiting remain enforced. Usage reports the applicable
+monthly limit, or `null` (displayed as “unlimited”) for an uncapped customer.
+
+**Free-trial kill switch:** set `EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT=0`
+in FastAPI Cloud and redeploy the same backend release. This blocks new free
+admissions and provider starts while customer-funded work continues. Keep trial,
+Cloudflare and quotas enabled; setting trial=false permits the legacy upload
+path. Restoring the approved call cap reopens free funding. The complementary
+`EXTRACTION_GLOBAL_TRIAL_MONTHLY_LIMIT` still bounds free successes plus pending
+reservations. Neither global trial cap limits customer-funded work.
+
+For a full intake pause during a coordinated rollout, additionally use an
+operator-managed ingress maintenance rule to reject upload/retry requests while
+leaving machine, status and maintenance routes reachable. Verify rejection for
+customer-funded organizations too before draining; a zero trial cap alone does
+not pause customer traffic. If that ingress gate is unavailable, do not begin
+the drain procedure.
+
 `worker.mjs` adapts a Cloudflare queue invocation to the backend machine endpoints and LandingAI. `queue.mjs` contains the delivery boundary and `landingai.mjs` performs provider requests. Run the local mocked checks with `node --test workflows/cloudflare/*.test.mjs`.
 
 The example queue and cron triggers are disabled, and the backend Cloudflare routes and trial are off by default. The production configuration is separate: a [read-only check on 2026-11-11](../../docs/trial-rollout-status-2026-11-11.md) confirmed protocol 2 deployed, trial intake restricted to one allowlisted organization, queue delivery enabled and a configured minute cron. That snapshot records existing extraction evidence and remaining readiness checks; it does not establish public-launch readiness. Mocked worker tests alone do not establish live provider behavior.
@@ -64,8 +108,9 @@ runbook review performed local checks only. The later rollout audit used
 read-only production checks described in the linked snapshot.
 
 1. On the current backend release, keep trial/Cloudflare/quotas enabled, set
-   `TRIAL_ALLOWED_ORGANIZATION_IDS=[]` in FastAPI Cloud and redeploy the same
-   release. Verify upload/retry 503. Setting trial=false permits legacy uploads;
+   `EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT=0` in FastAPI Cloud and redeploy the same
+   release. Enable the ingress maintenance gate for customer uploads/retries and
+   verify it rejects intake. Setting trial=false permits legacy uploads;
    setting Cloudflare=false prevents in-flight delivery and maintenance.
 2. Generate `wrangler.rollout.toml` beside the production config by replacing
    `crons = ["* * * * *"]` with `crons = []` (runbook step 2). Stop cron:
@@ -97,12 +142,13 @@ read-only production checks described in the linked snapshot.
    npx wrangler queues pause-delivery reink-extraction --config workflows/cloudflare/wrangler.rollout.toml
    ```
 
-5. Allow only the synthetic org, admit one synthetic PDF, manually dispatch it,
+5. Admit only the operator canary through the ingress gate, using its stored
+   customer key and a synthetic PDF; manually dispatch it,
    then use `queues resume-delivery` with the paused config for controlled canary
    delivery. Cron stays off. Verify completion/results, checkpoint/settlement,
-   exactly one trial start and no pending reservation before general resume.
+   zero trial starts for the customer-funded canary and no pending reservation before general resume.
 6. After the canary passes, deploy the **final** config, enable delivery, verify
-   the restored cron and maintenance, then restore the approved intake allowlist:
+   the restored cron and maintenance, then restore the approved trial call cap and remove the ingress maintenance gate:
 
    ```sh
    npx wrangler deploy --config workflows/cloudflare/wrangler.toml
@@ -111,7 +157,7 @@ read-only production checks described in the linked snapshot.
 
 A plain deploy of the final config earlier would re-enable the minute cron and
 consumer configuration. Queue pause alone cannot drain an existing backlog.
-On failure, empty intake, stop cron, pause/drain and restore a **matching** pair.
+On failure, set the trial call cap to zero and close the ingress gate, stop cron, pause/drain and restore a **matching** pair.
 Prefer keeping 0016 and its revision file in the rollback PR; dropping the
 revision file breaks CI against an already-upgraded DB. The runbook gives the
 optional owner-run downgrade to 0015, ACL/search_path checks and CI hold needed

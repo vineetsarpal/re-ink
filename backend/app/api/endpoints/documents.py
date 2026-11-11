@@ -54,10 +54,13 @@ def extraction_usage(db: Session = Depends(get_tenant_db),
     timestamp = datetime.now(timezone.utc)
     reset = datetime(timestamp.year + (timestamp.month == 12), timestamp.month % 12 + 1, 1, tzinfo=timezone.utc)
     usage = quota_usage(db, user.org_id, at=timestamp)
+    has_key = db.get(ProviderCredential, (user.org_id, "landingai")) is not None
+    monthly_limit = (None if user.org_id in settings.EXTRACTION_UNCAPPED_ORGANIZATION_IDS
+                     else settings.EXTRACTION_CUSTOMER_MONTHLY_LIMIT) if has_key else settings.EXTRACTION_MONTHLY_LIMIT
     return {"monthly_successes": usage.monthly_successes, "monthly_pending": usage.pending,
-            "monthly_limit": settings.EXTRACTION_MONTHLY_LIMIT,
+            "monthly_limit": monthly_limit,
             "trial_eligible": usage.trial_eligible,
-            "has_customer_key": db.get(ProviderCredential, (user.org_id, "landingai")) is not None,
+            "has_customer_key": has_key,
             "free_remaining": max(0, settings.EXTRACTION_FREE_LIMIT - usage.free_successes - usage.free_pending) if usage.trial_eligible else 0,
             "resets_at": reset.isoformat()}
 

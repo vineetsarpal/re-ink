@@ -80,7 +80,6 @@ def test_trial_upload_requires_notice_and_reserves_free_extraction(as_org, db_se
     }.items():
         monkeypatch.setattr(settings, name, value)
     org_id = "upload-" + uuid4().hex
-    monkeypatch.setattr(settings, "TRIAL_ALLOWED_ORGANIZATION_IDS", [org_id])
     client = as_org(org_id)
     seed_trial_quota(db_session, org_id)
     data = io.BytesIO()
@@ -108,11 +107,11 @@ def test_trial_upload_requires_notice_and_reserves_free_extraction(as_org, db_se
     assert client.get(f"/api/documents/file/{job_id}").status_code == 404
 
 
-def test_trial_mode_cannot_bypass_disabled_trial_with_an_api_key(as_org, monkeypatch):
+def test_trial_mode_cannot_bypass_notice_with_an_api_key(as_org, monkeypatch):
     monkeypatch.setattr(settings, "CLOUDFLARE_TRIAL_ENABLED", True)
     client = as_org("unavailable-" + uuid4().hex)
     response = client.post("/api/documents/upload", data={"api_key": "user-key"}, files={"file": ("sample.pdf", b"fake", "application/pdf")})
-    assert response.status_code == 503
+    assert response.status_code == 403
 
 
 def test_machine_and_maintenance_routes_are_disabled_by_default(client):
@@ -148,7 +147,6 @@ def test_five_free_completions_then_customer_key(as_org, db_session, monkeypatch
     }.items():
         monkeypatch.setattr(settings, name, value)
     org_id = "trial-completion-" + uuid4().hex
-    monkeypatch.setattr(settings, "TRIAL_ALLOWED_ORGANIZATION_IDS", [org_id])
     client = as_org(org_id)
     seed_trial_quota(db_session, org_id)
     connection = db_session.connection()

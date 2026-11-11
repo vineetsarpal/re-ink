@@ -73,9 +73,9 @@ def _locked_rate(db, org_id, timestamp, per_minute_limit):
 def _check_limits(global_quota, org, funding, *, global_trial_limit, global_trial_call_limit, monthly_limit, free_limit, attempt_limit):
     if funding == "trial" and not org.trial_eligible:
         raise HTTPException(403, {"code": "TRIAL_NOT_ELIGIBLE", "message": "Free extractions are not available for this organization; add a LandingAI key"})
-    if org.monthly_successes + org.pending >= monthly_limit:
+    if monthly_limit is not None and org.monthly_successes + org.pending >= monthly_limit:
         raise HTTPException(429, "Monthly extraction limit reached")
-    if org.monthly_attempts >= attempt_limit:
+    if attempt_limit is not None and org.monthly_attempts >= attempt_limit:
         raise HTTPException(429, "Monthly extraction attempt limit reached")
     if funding == "trial":
         if global_trial_call_limit is not None and global_quota.trial_starts >= global_trial_call_limit:
@@ -86,7 +86,7 @@ def _check_limits(global_quota, org, funding, *, global_trial_limit, global_tria
             raise HTTPException(429, "Free extractions temporarily unavailable; add a LandingAI key")
 
 
-def precheck_extraction(db, org_id, *, has_customer_key, global_trial_limit, global_trial_call_limit=None, monthly_limit=50, free_limit=5, attempt_limit=200, per_minute_limit=10, at=None, read_only=False):
+def precheck_extraction(db, org_id, *, has_customer_key, global_trial_limit, global_trial_call_limit=None, monthly_limit=50, customer_monthly_limit=500, customer_attempt_limit=2000, uncapped_customer=False, free_limit=5, attempt_limit=200, per_minute_limit=10, at=None, read_only=False):
     """Reject before storing an upload; rejections consume the per-minute limit.
 
     Callers must commit after a 429 so the rejection is counted. Admission is
@@ -94,6 +94,10 @@ def precheck_extraction(db, org_id, *, has_customer_key, global_trial_limit, glo
     without locks, inserts, resets, or counter increments.
     """
     _validate("precheck", global_trial_limit, global_trial_call_limit, monthly_limit, free_limit, attempt_limit, per_minute_limit)
+    if min(customer_monthly_limit, customer_attempt_limit) < 0:
+        raise ValueError("Invalid customer quota configuration")
+    if has_customer_key:
+        monthly_limit, attempt_limit = (None, None) if uncapped_customer else (customer_monthly_limit, customer_attempt_limit)
     timestamp = at or datetime.now(timezone.utc)
     if read_only:
         month = _month(timestamp)
@@ -127,8 +131,12 @@ def precheck_extraction(db, org_id, *, has_customer_key, global_trial_limit, glo
         raise
 
 
-def reserve_extraction(db, org_id, attempt_id, *, has_customer_key, global_trial_limit, global_trial_call_limit=None, monthly_limit=50, free_limit=5, attempt_limit=200, per_minute_limit=10, at=None):
+def reserve_extraction(db, org_id, attempt_id, *, has_customer_key, global_trial_limit, global_trial_call_limit=None, monthly_limit=50, customer_monthly_limit=500, customer_attempt_limit=2000, uncapped_customer=False, free_limit=5, attempt_limit=200, per_minute_limit=10, at=None):
     _validate(attempt_id, global_trial_limit, global_trial_call_limit, monthly_limit, free_limit, attempt_limit, per_minute_limit)
+    if min(customer_monthly_limit, customer_attempt_limit) < 0:
+        raise ValueError("Invalid customer quota configuration")
+    if has_customer_key:
+        monthly_limit, attempt_limit = (None, None) if uncapped_customer else (customer_monthly_limit, customer_attempt_limit)
     timestamp = at or datetime.now(timezone.utc)
     global_quota, org = _locked_accounts(db, org_id, _month(timestamp))
     existing = db.get(QuotaReservation, (org_id, attempt_id))
@@ -140,7 +148,8 @@ def reserve_extraction(db, org_id, attempt_id, *, has_customer_key, global_trial
     limits = dict(global_trial_limit=global_trial_limit, global_trial_call_limit=global_trial_call_limit,
                   monthly_limit=monthly_limit, free_limit=free_limit, attempt_limit=attempt_limit)
     # Preserve the original ordering: monthly limits are reported before throttling.
-    if org.monthly_successes + org.pending >= monthly_limit or org.monthly_attempts >= attempt_limit:
+    if ((monthly_limit is not None and org.monthly_successes + org.pending >= monthly_limit)
+            or (attempt_limit is not None and org.monthly_attempts >= attempt_limit)):
         _check_limits(global_quota, org, funding, **limits)
     rate = _locked_rate(db, org_id, timestamp, per_minute_limit)
     _check_limits(global_quota, org, funding, **limits)

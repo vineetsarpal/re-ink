@@ -102,7 +102,7 @@ def test_concurrent_admissions_cannot_exceed_monthly_capacity(restricted_engine)
             bind_session_to_org(db, org_id)
             barrier.wait(timeout=5)
             try:
-                reserve_extraction(db, org_id, attempt, has_customer_key=True, global_trial_limit=0, monthly_limit=1, at=NOW)
+                reserve_extraction(db, org_id, attempt, has_customer_key=True, global_trial_limit=0, customer_monthly_limit=1, at=NOW)
                 db.commit()
                 return "admitted"
             except HTTPException as exc:

@@ -1,4 +1,4 @@
-"""Synthetic trial access is restricted to explicitly selected organizations."""
+"""Extraction access follows the trial switch and existing permissions."""
 import pytest
 
 from app.core.config import settings
@@ -12,35 +12,29 @@ from app.core.config import settings
     ("post", "/api/provider-credentials/landingai/acknowledgment", {}),
     ("get", "/api/documents/usage", {}),
     ("post", "/api/documents/missing/retry", {}),
-    ("post", "/api/documents/upload", {"data": {"api_key": "key"}, "files": {"file": ("test.pdf", b"fake", "application/pdf")}}),
 ])
-def test_unselected_org_cannot_access_trial_even_with_legacy_key(as_org, monkeypatch, method, path, kwargs):
-    monkeypatch.setattr(settings, "CLOUDFLARE_TRIAL_ENABLED", True)
-    monkeypatch.setattr(settings, "TRIAL_ALLOWED_ORGANIZATION_IDS", ["selected-org"], raising=False)
+def test_disabled_trial_rejects_access_even_with_legacy_key(as_org, monkeypatch, method, path, kwargs):
+    monkeypatch.setattr(settings, "CLOUDFLARE_TRIAL_ENABLED", False)
     response = getattr(as_org("other-org"), method)(path, **kwargs)
     assert response.status_code == 503
 
 
-def test_config_and_access_follow_authenticated_org_and_revocation(as_org, monkeypatch):
+def test_config_and_access_follow_trial_switch(as_org, monkeypatch):
     monkeypatch.setattr(settings, "CLOUDFLARE_TRIAL_ENABLED", True)
-    monkeypatch.setattr(settings, "TRIAL_ALLOWED_ORGANIZATION_IDS", [], raising=False)
-    client = as_org("selected-org")
-    assert client.get("/api/system/config").json()["provider_credentials_enabled"] is False
-    assert client.get("/api/system/config").json()["trial_routing_enabled"] is True
-    assert client.get("/api/provider-credentials/landingai").status_code == 503
-    monkeypatch.setattr(settings, "TRIAL_ALLOWED_ORGANIZATION_IDS", ["selected-org"])
+    client = as_org("any-org")
     assert client.get("/api/system/config").json()["provider_credentials_enabled"] is True
+    assert client.get("/api/system/config").json()["trial_routing_enabled"] is True
     assert client.get("/api/provider-credentials/landingai").status_code == 200
-    monkeypatch.setattr(settings, "TRIAL_ALLOWED_ORGANIZATION_IDS", [])
+    monkeypatch.setattr(settings, "CLOUDFLARE_TRIAL_ENABLED", False)
+    assert client.get("/api/system/config").json()["provider_credentials_enabled"] is False
     assert client.get("/api/provider-credentials/landingai").status_code == 503
 
 
-def test_allowlisted_org_still_requires_permissions(as_org, monkeypatch):
+def test_open_access_still_requires_permissions(as_org, monkeypatch):
     from app.core.auth import CurrentUser, get_current_user
     from app.main import app
 
     monkeypatch.setattr(settings, "CLOUDFLARE_TRIAL_ENABLED", True)
-    monkeypatch.setattr(settings, "TRIAL_ALLOWED_ORGANIZATION_IDS", ["selected-org"])
     client = as_org("selected-org")
     app.dependency_overrides[get_current_user] = lambda: CurrentUser(
         user_id="viewer", org_id="selected-org", permissions=[]
@@ -52,9 +46,8 @@ def test_allowlisted_org_still_requires_permissions(as_org, monkeypatch):
     assert client.post("/api/documents/upload", files={"file": ("test.pdf", b"fake", "application/pdf")}).status_code == 403
 
 
-def test_trial_switch_disables_allowlisted_org(as_org, monkeypatch):
+def test_trial_switch_disables_org(as_org, monkeypatch):
     monkeypatch.setattr(settings, "CLOUDFLARE_TRIAL_ENABLED", False)
-    monkeypatch.setattr(settings, "TRIAL_ALLOWED_ORGANIZATION_IDS", ["selected-org"])
     client = as_org("selected-org")
     assert client.get("/api/system/config").json()["provider_credentials_enabled"] is False
     assert client.get("/api/system/config").json()["trial_routing_enabled"] is False

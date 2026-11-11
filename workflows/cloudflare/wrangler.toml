@@ -1,5 +1,9 @@
 # Production worker. Consumer and cron enabled 2026-11-11 for synthetic validation
-# (trial restricted to TRIAL_ALLOWED_ORGANIZATION_IDS). Secrets via `wrangler secret put`.
+# Open access: no org allowlist. Backend owns customer caps (500/2000 defaults)
+# and EXTRACTION_UNCAPPED_ORGANIZATION_IDS (customer funding only).
+# Kill switch: backend EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT=0; own keys continue.
+# Production open-access deploy waits on #60 and follow-up checks 1-3.
+# Secrets via `wrangler secret put`.
 name = "reink-extraction"
 main = "worker.mjs"
 compatibility_date = "2025-07-09"

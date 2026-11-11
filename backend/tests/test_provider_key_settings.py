@@ -8,7 +8,7 @@ from app.core.config import settings
 
 def test_admin_can_save_replace_and_remove_key_without_disclosure(client, monkeypatch):
     from app.api.endpoints import provider_credentials
-    monkeypatch.setattr(provider_credentials, "credentials_available", lambda user: True)
+    monkeypatch.setattr(settings, "CLOUDFLARE_TRIAL_ENABLED", True)
     monkeypatch.setattr(provider_credentials, "validate_landingai_key", lambda key: True)
     monkeypatch.setattr(settings, "PROVIDER_CREDENTIAL_ENCRYPTION_KEY", base64.urlsafe_b64encode(b"x" * 32).decode())
     path = "/api/provider-credentials/landingai"
@@ -28,7 +28,7 @@ def test_key_settings_are_disabled_until_extraction_is_connected(client):
 
 def test_keys_are_isolated_between_organizations(as_org, monkeypatch):
     from app.api.endpoints import provider_credentials
-    monkeypatch.setattr(provider_credentials, "credentials_available", lambda user: True)
+    monkeypatch.setattr(settings, "CLOUDFLARE_TRIAL_ENABLED", True)
     monkeypatch.setattr(provider_credentials, "validate_landingai_key", lambda key: True)
     monkeypatch.setattr(settings, "PROVIDER_CREDENTIAL_ENCRYPTION_KEY", base64.urlsafe_b64encode(b"x" * 32).decode())
     path = "/api/provider-credentials/landingai"
@@ -38,7 +38,7 @@ def test_keys_are_isolated_between_organizations(as_org, monkeypatch):
 
 def test_processing_acknowledgment_is_scoped_to_organization(as_org, monkeypatch):
     from app.api.endpoints import provider_credentials
-    monkeypatch.setattr(provider_credentials, "credentials_available", lambda user: True)
+    monkeypatch.setattr(settings, "CLOUDFLARE_TRIAL_ENABLED", True)
     path = "/api/provider-credentials/landingai/acknowledgment"
     first = as_org("notice-org-a-" + uuid.uuid4().hex)
     assert first.get(path).json() == {"acknowledged": False}

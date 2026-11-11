@@ -68,7 +68,6 @@ def test_ineligible_upload_reports_zero_free_remaining(as_org, db_session, monke
     db_session.flush()
     monkeypatch.setattr(settings, 'EXTRACTION_QUOTA_ENABLED', True)
     monkeypatch.setattr(settings, 'CLOUDFLARE_TRIAL_ENABLED', True)
-    monkeypatch.setattr(settings, 'TRIAL_ALLOWED_ORGANIZATION_IDS', [org])
     usage = client.get('/api/documents/usage').json()
     assert usage['free_remaining'] == 0
     assert usage['has_customer_key'] is False
@@ -211,7 +210,6 @@ def test_usage_reports_existing_customer_key(as_org, db_session, monkeypatch):
     db_session.add(ProviderCredential(org_id=org, provider='landingai', ciphertext=b'encrypted'))
     db_session.flush()
     monkeypatch.setattr(settings, 'CLOUDFLARE_TRIAL_ENABLED', True)
-    monkeypatch.setattr(settings, 'TRIAL_ALLOWED_ORGANIZATION_IDS', [org])
     usage = client.get('/api/documents/usage').json()
     assert usage['has_customer_key'] is True
     assert usage['trial_eligible'] is False
