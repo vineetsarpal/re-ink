@@ -43,7 +43,7 @@ export const ExtractionStatus: React.FC<ExtractionStatusProps> = ({
         if (response.status === 'completed') {
           setIsPolling(false);
           onComplete?.(response);
-        } else if (response.status === 'failed' || response.status === 'timed_out') {
+        } else if (response.status === 'failed' || response.status === 'timed_out' || response.status === 'cancelled') {
           setIsPolling(false);
           if (!allowRetry) onError?.(response.message || 'Extraction failed');
         }
@@ -77,6 +77,7 @@ export const ExtractionStatus: React.FC<ExtractionStatusProps> = ({
         return <CheckCircle size={24} className="text-success" />;
       case 'failed':
       case 'timed_out':
+      case 'cancelled':
         return <XCircle size={24} className="text-error" />;
       case 'processing':
       case 'submitted_to_ai':
@@ -94,6 +95,7 @@ export const ExtractionStatus: React.FC<ExtractionStatusProps> = ({
         return 'Extraction completed successfully!';
       case 'failed':
       case 'timed_out':
+      case 'cancelled':
         if (status.error_code === TRIAL_CAPACITY_UNAVAILABLE) {
           return 'Free extractions are temporarily unavailable. Add a LandingAI key or try again later.';
         }

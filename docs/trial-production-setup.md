@@ -51,12 +51,10 @@ one-off backfill with the same identity key and migration-owner database URL
 before expanding trial access; see [trial eligibility setup](trial-eligibility.md).
 
 The owner chose the existing production environment for synthetic validation;
-there were no live users at initial setup. A [read-only check on 2026-11-11 at
-18:37 UTC](trial-rollout-status-2026-11-11.md) confirmed protocol 2 deployed on
-the backend and Worker, trial intake restricted to one allowlisted organization,
-queue delivery enabled, and a configured minute cron. Public-launch readiness
-is not established. Existing data must be preserved. Earlier dated setup notes
-below describe historical state; use the linked snapshot for the latest checks.
+there were no live users at initial setup. A read-only check on 2026-11-11
+confirmed protocol 2 deployed on the backend and Worker, queue delivery enabled
+and a configured minute cron. Existing data must be preserved. Earlier dated
+setup notes below describe historical state.
 
 The approved initial limits are five successful free extractions per organization
 (lifetime), 50 successful extractions per organization per UTC month, and 100
@@ -183,9 +181,8 @@ The Cloudflare claim now authorizes preparation only. A separate one-shot
 `provider-start` request counts the trial start after document and credential
 fetches succeed, immediately before the provider probe. Existing machine role
 grants cover this operation. Protocol 2 now rejects mismatched pairs before a
-claim can spend a start. These changes were subsequently merged and deployed;
-see the [verified rollout snapshot](trial-rollout-status-2026-11-11.md) for
-evidence and remaining checks. The coordinated procedure below records the
+claim can spend a start. These changes were subsequently merged and deployed
+(verified read-only on 2026-11-11). The coordinated procedure below records the
 rollout sequence rather than a list of still-pending deployment steps.
 
 Preparation failures settle without spending a global trial start. Failed
@@ -203,7 +200,7 @@ pushes to `main`. Do not merge until step 4. Record the old backend SHA, Worker
 version and intake settings; use linked, clean release checkouts. Preserve keys, grants
 and quota counters. Commands start at repo root; keep shell tracing off.
 
-Verified locally with Wrangler **4.160.1** ([exact help capture](trial-rollout-wrangler-help.txt)):
+Verified locally with Wrangler **4.160.1**:
 `queues`, `pause-delivery`, `resume-delivery`, `info`, `triggers deploy`, `deploy`,
 `tail`. Recheck help when changing versions.
 

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Building2, KeyRound, Network, ShieldCheck } from 'lucide-react';
-import { adminApi, providerCredentialApi, systemApi, type AdminPortalIntent } from '@/services/api';
+import { useAuth } from '@workos-inc/authkit-react';
+import { organizationApi, adminApi, providerCredentialApi, systemApi, type AdminPortalIntent } from '@/services/api';
 
 const ACTIONS: { intent: AdminPortalIntent; title: string; description: string; Icon: typeof KeyRound }[] = [
   { intent: 'sso', title: 'Connect identity provider', description: 'Set up SAML or OpenID Connect single sign-on.', Icon: KeyRound },
@@ -9,6 +10,11 @@ const ACTIONS: { intent: AdminPortalIntent; title: string; description: string; 
 ];
 
 export const OrganizationSettingsPage: React.FC = () => {
+  const { permissions } = useAuth();
+  const canManageKeys = permissions.includes('member:manage');
+  const [closeConfirmation, setCloseConfirmation] = useState('');
+  const [closing, setClosing] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
   const [loading, setLoading] = useState<AdminPortalIntent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [credentialConfigured, setCredentialConfigured] = useState<boolean | null>(null);
@@ -20,10 +26,10 @@ export const OrganizationSettingsPage: React.FC = () => {
   useEffect(() => {
     systemApi.getConfig().then(async (config) => {
       setCredentialEnabled(config.provider_credentials_enabled);
-      if (config.provider_credentials_enabled) setCredentialConfigured((await providerCredentialApi.get()).configured);
+      if (config.provider_credentials_enabled && canManageKeys) setCredentialConfigured((await providerCredentialApi.get()).configured);
     })
       .catch(() => setCredentialError('Unable to load LandingAI key settings.'));
-  }, []);
+  }, [canManageKeys]);
   const saveCredential = async (event: React.FormEvent) => {
     event.preventDefault(); setCredentialBusy(true); setCredentialError(null); setCredentialMessage(null);
     try {
@@ -46,7 +52,7 @@ export const OrganizationSettingsPage: React.FC = () => {
   };
   return <div className="organization-settings-page">
     <header className="page-header"><div><h1>Organization settings</h1><p>Manage extraction and secure access for your workspace.</p></div></header>
-    {credentialEnabled && <section className="members-card"><h2><KeyRound size={20} /> LandingAI key</h2>
+    {credentialEnabled && permissions.includes('member:manage') && <section className="members-card"><h2><KeyRound size={20} /> LandingAI key</h2>
       <p>{credentialConfigured === null ? 'Checking key settings…' : credentialConfigured ? 'A key is saved for your organization.' : 'No organization key is saved.'}</p>
       <p>Get an API key from your <a href="https://landing.ai/" target="_blank" rel="noreferrer">LandingAI account</a>. Usage with your key is charged to your LandingAI account.</p>
       {credentialError && <p className="members-error" role="alert">{credentialError}</p>}
@@ -59,8 +65,24 @@ export const OrganizationSettingsPage: React.FC = () => {
       </form>
     </section>}
     {error && <div className="members-error" role="alert">{error}</div>}
-    <section className="members-card"><h2><Building2 size={20} /> Enterprise identity</h2><div className="settings-actions">
+    {permissions.includes('sso:manage') && <section className="members-card"><h2><Building2 size={20} /> Enterprise identity</h2><div className="settings-actions">
       {ACTIONS.map(({ intent, title, description, Icon }) => <article key={intent} className="settings-action"><Icon size={22} /><div><h3>{title}</h3><p>{description}</p></div><button className="btn btn-primary" disabled={loading !== null} onClick={() => void openPortal(intent)}>{loading === intent ? 'Opening…' : 'Configure'}</button></article>)}
-    </div></section>
+    </div></section>}
+    {permissions.includes('organization:close') && <section className="members-card" aria-labelledby="close-organization-heading">
+      <h2 id="close-organization-heading">Close organization</h2>
+      <p>Access stops immediately. Organization data is scheduled for deletion after 30 days. You can cancel closure before that date. Cancelled extractions will not restart.</p>
+      <p>Provider-side copies are governed by LandingAI’s terms.</p>
+      <form onSubmit={async (event) => {
+        event.preventDefault(); setClosing(true); setCloseError(null);
+        try { await organizationApi.close(closeConfirmation); }
+        catch (error: any) { setCloseError(typeof error.response?.data?.detail === 'string' ? error.response.data.detail : 'Unable to close organization. Please try again.'); }
+        finally { setClosing(false); }
+      }}>
+        <label htmlFor="close-confirmation">Type CLOSE to confirm organization closure</label>
+        <input id="close-confirmation" autoComplete="off" value={closeConfirmation} onChange={(event) => setCloseConfirmation(event.target.value)} />
+        <button className="btn btn-danger" type="submit" disabled={closing || closeConfirmation !== 'CLOSE'}>{closing ? 'Closing…' : 'Close organization'}</button>
+        {closeError && <p role="alert">{closeError}</p>}
+      </form>
+    </section>}
   </div>;
 };

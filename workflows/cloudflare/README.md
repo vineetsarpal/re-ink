@@ -46,7 +46,7 @@ the drain procedure.
 
 `worker.mjs` adapts a Cloudflare queue invocation to the backend machine endpoints and LandingAI. `queue.mjs` contains the delivery boundary and `landingai.mjs` performs provider requests. Run the local mocked checks with `node --test workflows/cloudflare/*.test.mjs`.
 
-The example queue and cron triggers are disabled, and the backend Cloudflare routes and trial are off by default. The production configuration is separate: a [read-only check on 2026-11-11](../../docs/trial-rollout-status-2026-11-11.md) confirmed protocol 2 deployed, trial intake restricted to one allowlisted organization, queue delivery enabled and a configured minute cron. That snapshot records existing extraction evidence and remaining readiness checks; it does not establish public-launch readiness. Mocked worker tests alone do not establish live provider behavior.
+The example queue and cron triggers are disabled, and the backend Cloudflare routes and trial are off by default. The production configuration is separate: a read-only check on 2026-11-11 confirmed protocol 2 deployed, queue delivery enabled and a configured minute cron. Mocked worker tests alone do not establish live provider behavior.
 
 The worker requests the same flat provider schema as the production FastAPI LandingAI integration, then maps the response into the review-result envelope. `provider-schema.json` is generated from `get_extraction_schema()` and must stay synchronized with that function. The worker does not transmit raw provider responses: guided intake reads the normalized `parsed_results`, which the backend must persist. The rollout audit confirmed completed extraction metadata; extraction quality and guided intake behavior still require authenticated UI verification before expanding access.
 
@@ -100,12 +100,9 @@ The existing scheduled request timeout is 45 seconds. Dispatch's budget is check
 
 Follow the [ordered production runbook](../../docs/trial-production-setup.md#coordinated-protocol-2-rollout)
 for the full commands, hidden credential prompts, read-only SQL, protocol probe,
-canary and rollback. This is the rollout procedure, not a pending-task checklist;
-see the [verified deployment snapshot](../../docs/trial-rollout-status-2026-11-11.md)
-for observed production state. CLI syntax was checked against Wrangler **4.160.1**
-([captured local help](../../docs/trial-rollout-wrangler-help.txt)); that original
-runbook review performed local checks only. The later rollout audit used
-read-only production checks described in the linked snapshot.
+canary and rollback. This is the completed rollout procedure, not a pending-task
+checklist. CLI syntax was checked against Wrangler **4.160.1**; recheck help when
+changing versions.
 
 1. On the current backend release, keep trial/Cloudflare/quotas enabled, set
    `EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT=0` in FastAPI Cloud and redeploy the same

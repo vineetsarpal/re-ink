@@ -12,6 +12,7 @@ from app.api.endpoints import (
     documents,
     members,
     onboarding,
+    organization,
     parties,
     provider_credentials,
     review,
@@ -19,6 +20,7 @@ from app.api.endpoints import (
     widgets,
 )
 from app.core.auth import get_current_user
+from app.core.organization_lifecycle import require_active_organization
 
 api_router = APIRouter()
 
@@ -30,7 +32,7 @@ api_router.include_router(cleanup_maintenance.router)
 
 # Every resource router requires a valid WorkOS access token. The public
 # endpoints (`/` and `/health`) live in app.main, outside this router.
-_auth = [Depends(get_current_user)]
+_auth = [Depends(get_current_user), Depends(require_active_organization)]
 
 api_router.include_router(provider_credentials.router, prefix="/provider-credentials", dependencies=_auth)
 
@@ -96,3 +98,5 @@ api_router.include_router(
     prefix="/onboarding",
     tags=["onboarding"],
 )
+
+api_router.include_router(organization.router, prefix="/organization", dependencies=_auth)
