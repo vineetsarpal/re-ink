@@ -18,7 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.api.endpoints.onboarding as onboarding
-from app.core.auth import CurrentUser, get_authenticated_user
+from app.core.auth import CurrentUser, get_authenticated_user, get_current_user
 from app.core.config import settings
 from app.main import app
 
@@ -352,3 +352,111 @@ def test_completed_intent_follows_current_memberships(
         assert calls[0].kwargs['request_options']['idempotency_key'] != calls[1].kwargs['request_options']['idempotency_key']
     if membership_state == 'elsewhere':
         assert client.post(PROVISION_PATH).json()['organization_id'] == other
+
+
+def test_leave_then_re_signup_is_trial_ineligible(
+    orgless_user, monkeypatch, restricted_engine
+):
+    import app.api.endpoints.members as members
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+    from app.core.tenancy import bind_session_to_org
+    from app.models.extraction_quota import TrialUser
+    from app.models.provisioning_intent import ProvisioningIntent
+    from app.services.extraction_quota import quota_usage
+
+    original = 'org-original-' + uuid4().hex
+    replacement = 'org-replacement-' + uuid4().hex
+    memberships = []
+    wos = MagicMock()
+
+    def list_memberships(**kwargs):
+        if 'organization_id' in kwargs:
+            data = [
+                membership for membership in memberships
+                if membership.organization_id == kwargs['organization_id']
+            ]
+        else:
+            data = [
+                membership for membership in memberships
+                if membership.user_id == kwargs['user_id']
+            ]
+        return SimpleNamespace(data=data)
+
+    def create_membership(**kwargs):
+        membership = SimpleNamespace(
+            id='om-' + kwargs['organization_id'],
+            user_id=kwargs['user_id'],
+            organization_id=kwargs['organization_id'],
+            role=SimpleNamespace(slug=kwargs['role']),
+        )
+        memberships.append(membership)
+        return membership
+
+    def delete_membership(membership_id):
+        memberships[:] = [
+            membership for membership in memberships if membership.id != membership_id
+        ]
+
+    wos.organization_membership.list_organization_memberships.side_effect = list_memberships
+    wos.organization_membership.create_organization_membership.side_effect = create_membership
+    def delete_user(user_id):
+        memberships[:] = [
+            membership for membership in memberships if membership.user_id != user_id
+        ]
+
+    wos.organization_membership.delete_organization_membership.side_effect = delete_membership
+    wos.user_management.delete_user.side_effect = delete_user
+    wos.user_management.get_user.return_value.email = uuid4().hex + '@gmail.com'
+    wos.user_management.get_user.return_value.email_verified = True
+    wos.organizations.list_organizations.return_value.data = []
+    wos.organizations.create_organization.side_effect = [
+        SimpleNamespace(id=original),
+        SimpleNamespace(id=replacement),
+    ]
+    monkeypatch.setattr(onboarding, '_workos_client', lambda: wos)
+    monkeypatch.setattr(members, '_workos_client', lambda: wos)
+    client = TestClient(app)
+
+    response = client.post(PROVISION_PATH)
+    assert response.status_code == 200, response.text
+    assert response.json()['organization_id'] == original
+    with Session(restricted_engine) as db:
+        bind_session_to_org(db, original)
+        assert quota_usage(db, original).trial_eligible is True
+        trial_user = db.scalars(
+            select(TrialUser).where(TrialUser.org_id == original)
+        ).one()
+        user_hash = trial_user.user_hash
+
+    memberships.append(SimpleNamespace(
+        id='om-other-admin',
+        user_id='other-admin',
+        organization_id=original,
+        role=SimpleNamespace(slug='admin'),
+    ))
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        user_id=orgless_user,
+        org_id=original,
+        role='admin',
+        permissions=[],
+    )
+    try:
+        response = client.post('/api/members/me/leave')
+        assert response.status_code == 200, response.text
+        assert response.json() == {'account_deleted': True}
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    wos.user_management.delete_user.assert_called_once_with(orgless_user)
+    with Session(restricted_engine) as db:
+        assert db.get(ProvisioningIntent, orgless_user) is None
+        assert db.get(TrialUser, user_hash) is not None
+
+    response = client.post(PROVISION_PATH)
+    assert response.status_code == 200, response.text
+    assert response.json()['organization_id'] == replacement
+    with Session(restricted_engine) as db:
+        bind_session_to_org(db, replacement)
+        assert quota_usage(db, replacement).trial_eligible is False
+        assert db.get(TrialUser, user_hash).org_id == original

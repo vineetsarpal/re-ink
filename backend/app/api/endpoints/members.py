@@ -7,10 +7,14 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 from workos import WorkOSClient
 
-from app.core.auth import CurrentUser, require_permission
+from app.core.auth import CurrentUser, get_current_user, require_permission
 from app.core.config import settings
+from app.db.database import get_db
+from app.models.provisioning_intent import ProvisioningIntent
 
 router = APIRouter()
 
@@ -48,6 +52,10 @@ class RemoveMemberResponse(BaseModel):
     message: str
 
 
+class LeaveOrganizationResponse(BaseModel):
+    account_deleted: bool
+
+
 def _workos_client() -> WorkOSClient:
     """Build a server-side WorkOS client. Seam for tests to patch."""
     return WorkOSClient(
@@ -61,9 +69,17 @@ def _role_slug(role) -> str:  # noqa: ANN001
 
 
 def _list_org_memberships(client: WorkOSClient, org_id: str):
-    return client.organization_membership.list_organization_memberships(
+    page = client.organization_membership.list_organization_memberships(
         organization_id=org_id
-    ).data
+    )
+    memberships = list(page.data)
+    while isinstance(getattr(page, "after", None), str):
+        page = client.organization_membership.list_organization_memberships(
+            organization_id=org_id,
+            after=page.after,
+        )
+        memberships.extend(page.data)
+    return memberships
 
 
 def _reject_if_last_admin_would_be_removed(
@@ -92,7 +108,10 @@ def _reject_if_last_admin_would_be_removed(
     if admin_count <= 1:
         raise HTTPException(
             status_code=409,
-            detail="Cannot remove or demote the last admin.",
+            detail=(
+                "Cannot remove or demote the last admin. Promote another member to "
+                "admin or close the organization first."
+            ),
         )
 
 
@@ -149,24 +168,96 @@ def invite_member(
     )
 
 
+def _lock_org_memberships(db: Session, org_id: str) -> None:
+    """Serialize membership changes per org until the transaction ends."""
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"reink:org-membership:{org_id}"},
+    )
+
+
+def _has_other_membership(client: WorkOSClient, user_id: str, membership_id: str) -> bool:
+    after = None
+    while True:
+        kwargs = {"user_id": user_id, "statuses": ["active", "inactive", "pending"]}
+        if after:
+            kwargs["after"] = after
+        page = client.organization_membership.list_organization_memberships(**kwargs)
+        if any(membership.id != membership_id for membership in page.data):
+            return True
+        after = getattr(page, "after", None)
+        if not isinstance(after, str):
+            return False
+
+
+@router.post("/me/leave", response_model=LeaveOrganizationResponse)
+def leave_organization(
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> LeaveOrganizationResponse:
+    """Remove the caller's own membership and delete a now-orgless account."""
+    client = _configured_client()
+    try:
+        _lock_org_memberships(db, user.org_id)
+        memberships = _list_org_memberships(client, user.org_id)
+        own_membership = next(
+            (m for m in memberships if m.user_id == user.user_id),
+            None,
+        )
+        if own_membership is None:
+            raise HTTPException(
+                status_code=404, detail="Organization membership not found."
+            )
+        _reject_if_last_admin_would_be_removed(
+            memberships,
+            target_membership_id=own_membership.id,
+        )
+
+        if _has_other_membership(client, user.user_id, own_membership.id):
+            client.organization_membership.delete_organization_membership(
+                own_membership.id
+            )
+            db.commit()
+            return LeaveOrganizationResponse(account_deleted=False)
+
+        intent = db.get(ProvisioningIntent, user.user_id)
+        if intent is not None:
+            db.delete(intent)
+            db.flush()
+        # Deleting the WorkOS user also removes its memberships.
+        client.user_management.delete_user(user.user_id)
+        db.commit()
+        return LeaveOrganizationResponse(account_deleted=True)
+    except Exception:
+        db.rollback()
+        raise
+
+
 @router.patch("/{membership_id}", response_model=MemberResponse)
 def update_member_role(
     membership_id: str,
     request: UpdateMemberRoleRequest,
     user: CurrentUser = Depends(require_permission("member:manage")),
+    db: Session = Depends(get_db),
 ) -> MemberResponse:
     """Change an organization member's role."""
     client = _configured_client()
-    memberships = _list_org_memberships(client, user.org_id)
-    _reject_if_last_admin_would_be_removed(
-        memberships,
-        target_membership_id=membership_id,
-        target_role=request.role,
-    )
-    updated = client.organization_membership.update_organization_membership(
-        membership_id,
-        role=request.role,
-    )
+    try:
+        _lock_org_memberships(db, user.org_id)
+        memberships = _list_org_memberships(client, user.org_id)
+        _reject_if_last_admin_would_be_removed(
+            memberships,
+            target_membership_id=membership_id,
+            target_role=request.role,
+        )
+        updated = client.organization_membership.update_organization_membership(
+            membership_id,
+            role=request.role,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return _member_response(updated)
 
 
@@ -174,13 +265,20 @@ def update_member_role(
 def remove_member(
     membership_id: str,
     user: CurrentUser = Depends(require_permission("member:manage")),
+    db: Session = Depends(get_db),
 ) -> RemoveMemberResponse:
     """Remove an organization member."""
     client = _configured_client()
-    memberships = _list_org_memberships(client, user.org_id)
-    _reject_if_last_admin_would_be_removed(
-        memberships,
-        target_membership_id=membership_id,
-    )
-    client.organization_membership.delete_organization_membership(membership_id)
+    try:
+        _lock_org_memberships(db, user.org_id)
+        memberships = _list_org_memberships(client, user.org_id)
+        _reject_if_last_admin_would_be_removed(
+            memberships,
+            target_membership_id=membership_id,
+        )
+        client.organization_membership.delete_organization_membership(membership_id)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return RemoveMemberResponse(message="Member removed successfully")
