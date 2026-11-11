@@ -50,5 +50,4 @@ def decrypt_credential(ciphertext: bytes, org_id: str, provider: str, encoded_ke
 
 def credentials_available(user) -> bool:
     from app.core.config import settings
-    return bool(settings.CLOUDFLARE_TRIAL_ENABLED and user.org_id
-                and user.org_id in settings.TRIAL_ALLOWED_ORGANIZATION_IDS)
+    return bool(settings.CLOUDFLARE_TRIAL_ENABLED and user.org_id)

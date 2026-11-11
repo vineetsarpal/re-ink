@@ -26,10 +26,13 @@ def _setting(name, default):
     return getattr(settings, name, default)
 
 
-def _quota_limits():
+def _quota_limits(org_id):
     return dict(global_trial_limit=settings.EXTRACTION_GLOBAL_TRIAL_MONTHLY_LIMIT,
                 global_trial_call_limit=settings.EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT,
                 monthly_limit=settings.EXTRACTION_MONTHLY_LIMIT,
+                customer_monthly_limit=settings.EXTRACTION_CUSTOMER_MONTHLY_LIMIT,
+                customer_attempt_limit=settings.EXTRACTION_CUSTOMER_MONTHLY_ATTEMPT_LIMIT,
+                uncapped_customer=org_id in settings.EXTRACTION_UNCAPPED_ORGANIZATION_IDS,
                 free_limit=settings.EXTRACTION_FREE_LIMIT,
                 attempt_limit=settings.EXTRACTION_MONTHLY_ATTEMPT_LIMIT,
                 per_minute_limit=settings.EXTRACTION_ATTEMPTS_PER_MINUTE)
@@ -41,7 +44,7 @@ def precheck_upload(db, org_id, *, read_only=False):
         return
     has_key = db.scalar(select(ProviderCredential.org_id).where(
         ProviderCredential.org_id == org_id, ProviderCredential.provider == "landingai")) is not None
-    precheck_extraction(db, org_id, has_customer_key=has_key, at=now(db), read_only=read_only, **_quota_limits())
+    precheck_extraction(db, org_id, has_customer_key=has_key, at=now(db), read_only=read_only, **_quota_limits(org_id))
 
 
 def _new_attempt(db, job, number):
@@ -52,7 +55,7 @@ def _new_attempt(db, job, number):
             ProviderCredential.org_id == job.org_id,
             ProviderCredential.provider == "landingai").with_for_update())
         reservation = reserve_extraction(db, job.org_id, attempt.attempt_id,
-            has_customer_key=credential is not None, at=timestamp, **_quota_limits())
+            has_customer_key=credential is not None, at=timestamp, **_quota_limits(job.org_id))
         try:
             key = (decrypt_credential(credential.ciphertext, job.org_id, "landingai", settings.PROVIDER_CREDENTIAL_ENCRYPTION_KEY)
                    if credential is not None else settings.LANDINGAI_TRIAL_API_KEY)

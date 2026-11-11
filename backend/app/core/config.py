@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     # Disabled until the complete asynchronous trial path is configured.
     EXTRACTION_QUOTA_ENABLED: bool = False
     EXTRACTION_MONTHLY_LIMIT: int = Field(default=50, ge=0)
+    EXTRACTION_CUSTOMER_MONTHLY_LIMIT: int = Field(default=500, ge=0)
+    EXTRACTION_CUSTOMER_MONTHLY_ATTEMPT_LIMIT: int = Field(default=2000, ge=0)
+    EXTRACTION_UNCAPPED_ORGANIZATION_IDS: List[str] = Field(default_factory=list)
     EXTRACTION_FREE_LIMIT: int = Field(default=5, ge=0)
     EXTRACTION_MONTHLY_ATTEMPT_LIMIT: int = Field(default=200, ge=0)
     EXTRACTION_ATTEMPTS_PER_MINUTE: int = Field(default=10, ge=1)
@@ -74,7 +77,6 @@ class Settings(BaseSettings):
     WORKFLOW_LEASE_SECONDS: int = Field(default=60, gt=0)
     CLOUDFLARE_ENABLED: bool = False
     CLOUDFLARE_TRIAL_ENABLED: bool = False
-    TRIAL_ALLOWED_ORGANIZATION_IDS: List[str] = Field(default_factory=list)
     CLOUDFLARE_MACHINE_DATABASE_URL: str = Field(default="", repr=False)
     CLOUDFLARE_DISPATCH_DATABASE_URL: str = Field(default="", repr=False)
     CLOUDFLARE_EXPIRY_DATABASE_URL: str = Field(default="", repr=False)
@@ -138,9 +140,8 @@ class Settings(BaseSettings):
         if self.CLOUDFLARE_ENABLED and not self.EXTRACTION_QUOTA_ENABLED:
             raise ValueError("CLOUDFLARE_ENABLED requires EXTRACTION_QUOTA_ENABLED")
         if self.CLOUDFLARE_TRIAL_ENABLED and (not self.CLOUDFLARE_ENABLED or not self.EXTRACTION_QUOTA_ENABLED
-                or not self.LANDINGAI_TRIAL_API_KEY or self.EXTRACTION_GLOBAL_TRIAL_MONTHLY_LIMIT <= 0
-                or self.EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT <= 0):
-            raise ValueError("Cloudflare trial requires quotas, a trial key, and positive global limits")
+                or not self.LANDINGAI_TRIAL_API_KEY):
+            raise ValueError("Cloudflare trial requires quotas and a trial key")
         if not self.CLOUDFLARE_ENABLED:
             return self
         from sqlalchemy.engine import make_url

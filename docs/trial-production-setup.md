@@ -1,5 +1,49 @@
 # Production trial setup
 
+## Open access deployment gate
+
+Do not deploy open access to production until **#60 is complete** and follow-up
+checks **1–3** pass: signed-in UI extraction, the `TRIAL_CAPACITY_UNAVAILABLE`
+message, and confirmed scheduled maintenance outcomes. Merging is permitted.
+
+The organization allowlist has been removed. A leftover
+`TRIAL_ALLOWED_ORGANIZATION_IDS` environment variable is harmless because
+settings use `extra='ignore'`; it has no effect and can be removed. All
+organizations can manage keys and extract when `CLOUDFLARE_TRIAL_ENABLED=true`,
+subject to permissions, processing acknowledgment, eligibility, and quotas.
+
+Backend settings (not Worker variables):
+
+```text
+EXTRACTION_MONTHLY_LIMIT=50
+EXTRACTION_MONTHLY_ATTEMPT_LIMIT=200
+EXTRACTION_CUSTOMER_MONTHLY_LIMIT=500
+EXTRACTION_CUSTOMER_MONTHLY_ATTEMPT_LIMIT=2000
+EXTRACTION_UNCAPPED_ORGANIZATION_IDS=[]
+```
+
+The customer attempt default preserves the trial defaults' 4:1 ratio. Configure
+`EXTRACTION_UNCAPPED_ORGANIZATION_IDS` as a JSON array of approved organization
+IDs. Listed organizations skip only monthly success and attempt caps, and only
+while using their own stored key. Trial eligibility, free limits, global trial
+caps, and per-minute rate limiting remain enforced. Usage reports the applicable
+monthly limit, or `null` (displayed as “unlimited”) for an uncapped customer.
+
+**Free-trial kill switch:** set `EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT=0`
+in FastAPI Cloud and redeploy the same backend release. This blocks new free
+admissions and provider starts while customer-funded work continues. Keep trial,
+Cloudflare and quotas enabled; setting trial=false permits the legacy upload
+path. Restoring the approved call cap reopens free funding. The complementary
+`EXTRACTION_GLOBAL_TRIAL_MONTHLY_LIMIT` still bounds free successes plus pending
+reservations. Neither global trial cap limits customer-funded work.
+
+For a full intake pause during a coordinated rollout, additionally use an
+operator-managed ingress maintenance rule to reject upload/retry requests while
+leaving machine, status and maintenance routes reachable. Verify rejection for
+customer-funded organizations too before draining; a zero trial cap alone does
+not pause customer traffic. If that ingress gate is unavailable, do not begin
+the drain procedure.
+
 Before deploying trial eligibility, set `TRIAL_IDENTITY_HASH_KEY` as a secret in
 FastAPI Cloud. Generate a high-entropy value and retain it across deployments.
 Migration 0017 needs no identity or WorkOS secrets. After migrating, run the
@@ -30,7 +74,7 @@ EXTRACTION_GLOBAL_TRIAL_MONTHLY_LIMIT=100
 The second global setting limits successful or pending free reservations to
 100 as a complementary admission safeguard; the starts limit above is the
 controlling cap on funded provider attempts. Leave both code defaults at zero,
-so a deployment without explicit limits cannot enable the trial.
+so a deployment without explicit limits cannot spend free-trial funding.
 
 Follow the agreed order: inspect existing resources and confirm the database
 target, prepare restricted database roles and validate migrations, configure
@@ -156,7 +200,7 @@ For a **separately authorized** production window; only local help/SQL checks
 were performed during this review. Freeze other backend merges/deploys:
 `.github/workflows/deploy.yml` runs **upgrade head → FastAPI deploy** on backend
 pushes to `main`. Do not merge until step 4. Record the old backend SHA, Worker
-version and allowlist; use linked, clean release checkouts. Preserve keys, grants
+version and intake settings; use linked, clean release checkouts. Preserve keys, grants
 and quota counters. Commands start at repo root; keep shell tracing off.
 
 Verified locally with Wrangler **4.160.1** ([exact help capture](trial-rollout-wrangler-help.txt)):
@@ -166,22 +210,22 @@ Verified locally with Wrangler **4.160.1** ([exact help capture](trial-rollout-w
 **1. Block intake on the currently running backend release.** From its linked
 checkout (not the candidate checkout), keep `CLOUDFLARE_TRIAL_ENABLED=true`,
 `CLOUDFLARE_ENABLED=true`, `EXTRACTION_QUOTA_ENABLED=true` and existing keys/limits.
-Set the allowlist to empty, then deploy that **same old backend code** so all
-processes pick up the setting:
+Set `EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT=0`, then deploy that same
+backend release. Also enable the ingress maintenance gate described above to
+block customer uploads/retries; leave machine and maintenance routes available.
 
 ```sh
 cd backend
-uv run fastapi cloud env set TRIAL_ALLOWED_ORGANIZATION_IDS '[]'
+uv run fastapi cloud env set EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT 0
 uv run fastapi deploy --app-id "$FASTAPI_CLOUD_APP_ID"
 cd ..
 ```
 
-The FastAPI CLI forms above were verified with local `--help`; the same setting
-can be applied through FastAPI Cloud's app environment settings and redeploy.
-Require authenticated upload/retry 503 for a previously allowed org. Admitted
-requests can finish; status and machine/maintenance routes stay enabled.
-**Trial=false permits legacy uploads; Cloudflare=false blocks draining.**
-Preserve the empty allowlist through CI.
+Verify free uploads are rejected by the capacity policy and customer uploads and
+retries are rejected by the ingress gate. Admitted requests can finish; status
+and machine/maintenance routes stay enabled. Preserve the kill switch and
+maintenance gate through CI. Trial=false permits legacy uploads;
+Cloudflare=false blocks draining.
 
 **2. Stop cron dispatch, drain the old matched pair, then pause delivery.** Make
 a local, uncommitted config beside the original so its relative `main` stays
@@ -303,7 +347,7 @@ approved backend PR into `main` through the normal review process. Wait for the
 `Run database migrations` and `Deploy`. Do not launch a competing manual deploy.
 Rerun step 3: require revision `0016_cleanup_backoff`, unchanged schema counts,
 no definer-function access for `reink_app`, and `search_path=pg_catalog, pg_temp`.
-Reconfirm intake returns 503 and the allowlist is still empty.
+Reconfirm the ingress gate rejects intake and the global trial call cap remains zero.
 
 Probe protocol 2 without claiming or reserving a job (the route validates the
 signed capability but does not access the DB). Supply existing secrets only at
@@ -341,16 +385,10 @@ Recheck pause state and absent cron. The final `wrangler.toml` would restart
 cron dispatch; do not deploy it yet. The consumer remains configured but paused.
 
 **6. Controlled canary, then general resume.** With cron off/backlog empty,
-allow **only the synthetic org** and apply it on the same new backend release:
-
-```sh
-cd backend
-uv run fastapi cloud env set TRIAL_ALLOWED_ORGANIZATION_IDS '["org_REPLACE_SYNTHETIC"]'
-uv run fastapi deploy --app-id "$FASTAPI_CLOUD_APP_ID"
-cd ..
-```
-
-Keep trial/Cloudflare/quotas true; verify other orgs get 503. Canary delivery
+keep the trial call cap at zero. Configure the ingress maintenance gate to
+admit only the operator's synthetic canary request, using a stored customer key.
+Keep trial/Cloudflare/quotas true and verify other intake is still blocked.
+Canary delivery
 requires a controlled queue resume before general intake:
 
 ```sh
@@ -370,8 +408,9 @@ cd ..
 Poll to completion; inspect synthetic results/guided review in the authenticated
 UI. Rerun the step-3 check with the job ID (command below): require a completed
 checkpoint and delivered receipt, succeeded reservation and provider_started.
-For a trial-funded canary, global starts/successes each increase by exactly one,
-with no pending quota left; preparation alone must not spend a start. Check
+For this customer-funded canary, global trial starts/successes stay unchanged,
+with no pending quota left. When separately verifying free funding after restoring
+the trial call cap, one successful extraction increases both trial counters by one. Check
 protocol/maintenance errors. On failure pause again and roll back, not retry.
 
 ```sh
@@ -389,11 +428,11 @@ npx wrangler queues info reink-extraction --config workflows/cloudflare/wrangler
 ```
 
 Verify the minute cron, intended consumer and live expiry/cleanup. Restore the
-recorded approved intake allowlist in FastAPI Cloud and redeploy the **same**
+approved global trial call cap in FastAPI Cloud, remove the ingress gate, and redeploy the **same**
 verified backend release. Observe queue age, starts and errors before ending the
 window. Remove the temporary config/helpers; never commit them or credentials.
 
-**Rollback if verification fails.** Empty the allowlist and apply it on the
+**Rollback if verification fails.** Set the trial call cap to zero, close the ingress gate, and apply on the
 current backend, stop cron with step 2, pause delivery, then wait for the same
 invocation/SQL drain. Manually run expiry/cleanup as needed. If failed-canary
 messages remain, first let their attempts become terminal, briefly resume the

@@ -85,7 +85,7 @@ api.interceptors.response.use(
 
 // Document APIs
 export const documentApi = {
-  usage: async (): Promise<{ monthly_successes: number; monthly_pending: number; monthly_limit: number; free_remaining: number; trial_eligible: boolean; has_customer_key: boolean; resets_at: string }> =>
+  usage: async (): Promise<{ monthly_successes: number; monthly_pending: number; monthly_limit: number | null; free_remaining: number; trial_eligible: boolean; has_customer_key: boolean; resets_at: string }> =>
     (await api.get('/documents/usage')).data,
   /**
    * Upload a document for extraction.

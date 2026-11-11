@@ -57,7 +57,6 @@ def trial(as_org, db_session, monkeypatch):
     }.items():
         monkeypatch.setattr(settings, name, value)
     org_id = "hardening-" + uuid4().hex
-    monkeypatch.setattr(settings, "TRIAL_ALLOWED_ORGANIZATION_IDS", [org_id])
     client = as_org(org_id)
     seed_trial_quota(db_session, org_id)
     connection = db_session.connection()
