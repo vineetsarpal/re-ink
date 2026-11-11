@@ -8,7 +8,8 @@ The WorkOS client is stubbed — no network.
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, ANY
+from uuid import uuid4
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event, Lock
 from types import SimpleNamespace
@@ -31,10 +32,11 @@ def orgless_user(monkeypatch):
     # client itself is stubbed per test.
     monkeypatch.setattr(settings, "TRIAL_IDENTITY_HASH_KEY", "test-identity-key")
     monkeypatch.setattr(settings, "WORKOS_API_KEY", "dummy-key")
+    user_id = "user-" + uuid4().hex
     app.dependency_overrides[get_authenticated_user] = lambda: CurrentUser(
-        user_id="user_new", org_id=None
+        user_id=user_id, org_id=None
     )
-    yield
+    yield user_id
     app.dependency_overrides.pop(get_authenticated_user, None)
 
 
@@ -51,9 +53,9 @@ def test_provision_creates_dedicated_org_named_after_email(orgless_user, monkeyp
 
     assert resp.status_code == 200, resp.text
     assert resp.json()["organization_id"] == "org_new123"
-    wos.organizations.create_organization.assert_called_once_with(name="alice@acme.com")
+    wos.organizations.create_organization.assert_called_once_with(name="alice@acme.com", request_options={"idempotency_key": ANY})
     wos.organization_membership.create_organization_membership.assert_called_once_with(
-        user_id="user_new", organization_id="org_new123", role="admin"
+        user_id=orgless_user, organization_id="org_new123", role="admin"
     )
 
 
@@ -81,7 +83,7 @@ def test_provision_joins_single_verified_domain_match_as_viewer(
     wos.organizations.list_organizations.assert_called_once_with(domains=["acme.com"])
     wos.organizations.create_organization.assert_not_called()
     wos.organization_membership.create_organization_membership.assert_called_once_with(
-        user_id="user_new", organization_id="org_acme", role="viewer"
+        user_id=orgless_user, organization_id="org_acme", role="viewer"
     )
 
 
@@ -131,9 +133,9 @@ def test_provision_falls_back_to_solo_admin_org_without_one_verified_domain_matc
 
     assert resp.status_code == 200, resp.text
     assert resp.json()["organization_id"] == expected_org_id
-    wos.organizations.create_organization.assert_called_once_with(name="alice@acme.com")
+    wos.organizations.create_organization.assert_called_once_with(name="alice@acme.com", request_options={"idempotency_key": ANY})
     wos.organization_membership.create_organization_membership.assert_called_once_with(
-        user_id="user_new", organization_id=expected_org_id, role="admin"
+        user_id=orgless_user, organization_id=expected_org_id, role="admin"
     )
 
 
@@ -204,3 +206,149 @@ def test_concurrent_first_requests_create_only_one_organization(orgless_user, mo
 def test_provision_requires_authentication():
     """No token → 401, even though the endpoint allows orgless users."""
     assert TestClient(app).post(PROVISION_PATH).status_code == 401
+
+
+def test_creation_timeout_retries_same_idempotency_key(orgless_user, monkeypatch, restricted_engine):
+    wos = MagicMock()
+    wos.organization_membership.list_organization_memberships.return_value.data = []
+    wos.user_management.get_user.return_value.email = 'retry@gmail.com'
+    wos.user_management.get_user.return_value.email_verified = True
+    wos.organizations.list_organizations.return_value.data = []
+    created = {}
+    keys = []
+
+    def create(**kwargs):
+        from sqlalchemy.orm import Session
+        from app.models.provisioning_intent import ProvisioningIntent
+        with Session(restricted_engine) as db:
+            intent = db.get(ProvisioningIntent, orgless_user)
+            assert intent.state == 'pending'
+            assert intent.created_at is not None
+        key = kwargs['request_options']['idempotency_key']
+        keys.append(key)
+        org = created.setdefault(key, SimpleNamespace(id='org-timeout-' + orgless_user))
+        if len(keys) == 1:
+            raise TimeoutError('WorkOS created the organization but response was lost')
+        return org
+
+    wos.organizations.create_organization.side_effect = create
+    monkeypatch.setattr(onboarding, '_workos_client', lambda: wos)
+    client = TestClient(app, raise_server_exceptions=False)
+    assert client.post(PROVISION_PATH).status_code == 500
+    response = client.post(PROVISION_PATH)
+    assert response.status_code == 200, response.text
+    assert response.json()['organization_id'] == 'org-timeout-' + orgless_user
+    assert len(created) == 1
+    assert len(keys) == 2 and keys[0] == keys[1]
+
+
+@pytest.mark.parametrize('membership_created', [False, True])
+def test_retry_after_membership_failure_completes_trial_once(
+    orgless_user, monkeypatch, restricted_engine, membership_created
+):
+    from sqlalchemy.orm import Session
+    from app.core.tenancy import bind_session_to_org
+    from app.models.provisioning_intent import ProvisioningIntent
+    from app.services.extraction_quota import quota_usage, reserve_extraction
+
+    org_id = 'org-recovery-' + uuid4().hex
+    wos = MagicMock()
+    memberships = []
+    wos.organization_membership.list_organization_memberships.side_effect = lambda **kwargs: SimpleNamespace(data=list(memberships))
+    wos.user_management.get_user.return_value.email = uuid4().hex + '@gmail.com'
+    wos.user_management.get_user.return_value.email_verified = True
+    wos.organizations.list_organizations.return_value.data = []
+    wos.organizations.create_organization.return_value.id = org_id
+    attempts = 0
+
+    def membership(**kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            if membership_created:
+                memberships.append(SimpleNamespace(organization_id=org_id))
+            raise TimeoutError('Membership response lost')
+        memberships.append(SimpleNamespace(organization_id=org_id))
+
+    wos.organization_membership.create_organization_membership.side_effect = membership
+    monkeypatch.setattr(onboarding, '_workos_client', lambda: wos)
+    client = TestClient(app, raise_server_exceptions=False)
+    assert client.post(PROVISION_PATH).status_code == 500
+    with Session(restricted_engine) as db:
+        intent = db.get(ProvisioningIntent, orgless_user)
+        assert intent.state == 'org_created'
+        assert intent.org_id == org_id
+        bind_session_to_org(db, org_id)
+        assert quota_usage(db, org_id).trial_eligible is False
+    response = client.post(PROVISION_PATH)
+    assert response.status_code == 200, response.text
+    assert response.json()['organization_id'] == org_id
+    wos.organizations.create_organization.assert_called_once()
+    assert attempts == (1 if membership_created else 2)
+    with Session(restricted_engine) as db:
+        assert db.get(ProvisioningIntent, orgless_user).state == 'completed'
+        bind_session_to_org(db, org_id)
+        assert quota_usage(db, org_id).trial_eligible is True
+        reserve_extraction(db, org_id, 'one', has_customer_key=False, global_trial_limit=100000)
+        completed_at = db.get(ProvisioningIntent, orgless_user).updated_at
+        assert client.post(PROVISION_PATH).json()['organization_id'] == org_id
+        assert attempts == (1 if membership_created else 2)
+        assert quota_usage(db, org_id).free_pending == 1
+        db.refresh(db.get(ProvisioningIntent, orgless_user))
+        assert db.get(ProvisioningIntent, orgless_user).updated_at == completed_at
+
+
+@pytest.mark.parametrize('membership_state', ['removed', 'elsewhere', 'still_member'])
+def test_completed_intent_follows_current_memberships(
+    orgless_user, monkeypatch, restricted_engine, membership_state
+):
+    from sqlalchemy.orm import Session
+    from app.core.tenancy import bind_session_to_org
+    from app.models.provisioning_intent import ProvisioningIntent
+    from app.services.extraction_quota import quota_usage
+
+    original, replacement, other = [uuid4().hex for _ in range(3)]
+    memberships = []
+    wos = MagicMock()
+    wos.organization_membership.list_organization_memberships.side_effect = lambda **kwargs: SimpleNamespace(data=list(memberships))
+    wos.organization_membership.create_organization_membership.side_effect = lambda **kwargs: memberships.append(SimpleNamespace(organization_id=kwargs['organization_id']))
+    wos.user_management.get_user.return_value.email = uuid4().hex + '@gmail.com'
+    wos.user_management.get_user.return_value.email_verified = True
+    wos.organizations.list_organizations.return_value.data = []
+    wos.organizations.create_organization.side_effect = [SimpleNamespace(id=original), SimpleNamespace(id=replacement)]
+    monkeypatch.setattr(onboarding, '_workos_client', lambda: wos)
+    client = TestClient(app)
+    assert client.post(PROVISION_PATH).json()['organization_id'] == original
+    with Session(restricted_engine) as db:
+        original_intent_id = db.get(ProvisioningIntent, orgless_user).intent_id
+        bind_session_to_org(db, original)
+        assert quota_usage(db, original).trial_eligible is True
+
+    if membership_state == 'removed':
+        memberships.clear()
+        expected = replacement
+    elif membership_state == 'elsewhere':
+        memberships[:] = [SimpleNamespace(organization_id=other)]
+        expected = other
+    else:
+        memberships.insert(0, SimpleNamespace(organization_id=other))
+        expected = original
+    response = client.post(PROVISION_PATH)
+    assert response.status_code == 200, response.text
+    assert response.json()['organization_id'] == expected
+    with Session(restricted_engine) as db:
+        intent = db.get(ProvisioningIntent, orgless_user)
+        assert intent.org_id == expected
+        assert intent.state == 'completed'
+        if membership_state == 'removed':
+            assert intent.intent_id != original_intent_id
+            bind_session_to_org(db, replacement)
+            assert quota_usage(db, replacement).trial_eligible is False
+        else:
+            assert intent.intent_id == original_intent_id
+    calls = wos.organizations.create_organization.call_args_list
+    assert len(calls) == (2 if membership_state == 'removed' else 1)
+    if membership_state == 'removed':
+        assert calls[0].kwargs['request_options']['idempotency_key'] != calls[1].kwargs['request_options']['idempotency_key']
+    if membership_state == 'elsewhere':
+        assert client.post(PROVISION_PATH).json()['organization_id'] == other
