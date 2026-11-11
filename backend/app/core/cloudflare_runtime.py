@@ -2,10 +2,30 @@
 from functools import lru_cache
 
 from fastapi import HTTPException
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
+
+
+class MachinePoolSettings(BaseSettings):
+    """Machine-route pool per backend process.
+
+    The example consumer runs max_batch_size=1, max_concurrency=1, so each Worker
+    makes one sequential request; the second connection covers a retry that
+    overlaps a request the Worker abandoned on timeout. Raise with concurrency.
+    """
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    CLOUDFLARE_MACHINE_POOL_SIZE: int = Field(default=2, ge=1, le=20)
+    CLOUDFLARE_MACHINE_POOL_MAX_OVERFLOW: int = Field(default=1, ge=0, le=20)
+    CLOUDFLARE_MACHINE_POOL_TIMEOUT_SECONDS: int = Field(default=5, ge=1, le=30)
+
+
+@lru_cache(maxsize=1)
+def pool_settings() -> MachinePoolSettings:
+    return MachinePoolSettings()
 
 
 def require_enabled():
@@ -14,16 +34,18 @@ def require_enabled():
 
 
 @lru_cache(maxsize=4)
-def _factory(url: str):
+def _factory(url: str, pool_size: int = 1, max_overflow: int = 0, pool_timeout: int = 2):
     url = url.replace("postgresql://", "postgresql+psycopg://", 1)
-    engine = create_engine(url, pool_size=1, max_overflow=0, pool_timeout=2,
+    engine = create_engine(url, pool_size=pool_size, max_overflow=max_overflow, pool_timeout=pool_timeout,
                            pool_pre_ping=True, connect_args={"connect_timeout": 3})
     return sessionmaker(bind=engine, autoflush=False)
 
 
 def machine_factory():
     require_enabled()
-    return _factory(settings.CLOUDFLARE_MACHINE_DATABASE_URL)
+    pool = pool_settings()
+    return _factory(settings.CLOUDFLARE_MACHINE_DATABASE_URL, pool.CLOUDFLARE_MACHINE_POOL_SIZE,
+                    pool.CLOUDFLARE_MACHINE_POOL_MAX_OVERFLOW, pool.CLOUDFLARE_MACHINE_POOL_TIMEOUT_SECONDS)
 
 
 def dispatch_factory():

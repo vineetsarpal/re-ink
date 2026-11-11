@@ -28,3 +28,11 @@ def abandon_expired_upload(db, org_id, job_id):
         UploadIntent.org_id == org_id, UploadIntent.job_id == job_id,
         UploadIntent.status == "uploading", UploadIntent.lease_deadline <= func.clock_timestamp(),
     ).values(status="abandoned").returning(UploadIntent.job_id)).scalar_one_or_none() is not None
+
+
+def discard_upload(db, org_id, job_id, key):
+    """Terminal state after the request itself deleted its stored original."""
+    db.execute(update(UploadIntent).where(
+        UploadIntent.org_id == org_id, UploadIntent.job_id == job_id,
+        UploadIntent.storage_key == key, UploadIntent.status == "uploading",
+    ).values(status="deleted"))

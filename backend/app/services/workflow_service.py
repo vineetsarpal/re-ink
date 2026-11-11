@@ -12,7 +12,7 @@ from app.models.extraction_job import ExtractionJob
 from app.models.workflow import ExtractionAttempt, WorkflowOutbox, WorkflowReceipt, StorageCleanup
 from app.models.provider_credential import ProviderCredential
 from app.models.extraction_quota import QuotaReservation
-from app.services.extraction_quota import reserve_extraction, settle_extraction
+from app.services.extraction_quota import precheck_extraction, reserve_extraction, settle_extraction
 from app.services.provider_credentials import CredentialEncryptionError, decrypt_credential, encrypt_credential
 
 ACTIVE = {"queued", "processing"}
@@ -26,6 +26,24 @@ def _setting(name, default):
     return getattr(settings, name, default)
 
 
+def _quota_limits():
+    return dict(global_trial_limit=settings.EXTRACTION_GLOBAL_TRIAL_MONTHLY_LIMIT,
+                global_trial_call_limit=settings.EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT,
+                monthly_limit=settings.EXTRACTION_MONTHLY_LIMIT,
+                free_limit=settings.EXTRACTION_FREE_LIMIT,
+                attempt_limit=settings.EXTRACTION_MONTHLY_ATTEMPT_LIMIT,
+                per_minute_limit=settings.EXTRACTION_ATTEMPTS_PER_MINUTE)
+
+
+def precheck_upload(db, org_id):
+    """Reject over-quota uploads before any storage write; caller commits."""
+    if not _setting("EXTRACTION_QUOTA_ENABLED", False):
+        return
+    has_key = db.scalar(select(ProviderCredential.org_id).where(
+        ProviderCredential.org_id == org_id, ProviderCredential.provider == "landingai")) is not None
+    precheck_extraction(db, org_id, has_customer_key=has_key, at=now(db), **_quota_limits())
+
+
 def _new_attempt(db, job, number):
     timestamp = now(db)
     attempt = ExtractionAttempt(attempt_id=str(uuid.uuid4()), job_id=job.job_id, org_id=job.org_id, number=number, status="queued", created_at=timestamp, deadline_at=timestamp + timedelta(seconds=_setting("WORKFLOW_QUEUE_TIMEOUT_SECONDS", 600)))
@@ -34,14 +52,7 @@ def _new_attempt(db, job, number):
             ProviderCredential.org_id == job.org_id,
             ProviderCredential.provider == "landingai").with_for_update())
         reservation = reserve_extraction(db, job.org_id, attempt.attempt_id,
-            has_customer_key=credential is not None,
-            global_trial_limit=settings.EXTRACTION_GLOBAL_TRIAL_MONTHLY_LIMIT,
-            global_trial_call_limit=settings.EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT,
-            monthly_limit=settings.EXTRACTION_MONTHLY_LIMIT,
-            free_limit=settings.EXTRACTION_FREE_LIMIT,
-            attempt_limit=settings.EXTRACTION_MONTHLY_ATTEMPT_LIMIT,
-            per_minute_limit=settings.EXTRACTION_ATTEMPTS_PER_MINUTE,
-            at=timestamp)
+            has_customer_key=credential is not None, at=timestamp, **_quota_limits())
         try:
             key = (decrypt_credential(credential.ciphertext, job.org_id, "landingai", settings.PROVIDER_CREDENTIAL_ENCRYPTION_KEY)
                    if credential is not None else settings.LANDINGAI_TRIAL_API_KEY)

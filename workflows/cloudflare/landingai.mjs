@@ -1,5 +1,8 @@
 // Isolated compatibility probe; this is not a queue consumer or production adapter.
 const API = 'https://api.va.landing.ai/v1/ade';
+// Parse + extract must finish inside the backend's 600s processing deadline.
+export const PARSE_TIMEOUT_MS = 180000;
+export const EXTRACT_TIMEOUT_MS = 120000;
 
 export async function probeLandingAI({ document, filename, apiKey, parseModel, extractModel, schema, fetchImpl = fetch }) {
   if (!(document instanceof Blob) || !filename || !apiKey || !parseModel || !extractModel || !schema) {
@@ -10,7 +13,7 @@ export async function probeLandingAI({ document, filename, apiKey, parseModel, e
   parseForm.append('document', document, filename);
   parseForm.append('model', parseModel);
   const parsedResponse = await fetchImpl(`${API}/parse`, {
-    method: 'POST', headers, body: parseForm, redirect: 'error',
+    method: 'POST', headers, body: parseForm, redirect: 'error', signal: AbortSignal.timeout(PARSE_TIMEOUT_MS),
   });
   if (parsedResponse.status !== 200) throw new Error('PARSE_FAILED');
   const parsed = await parsedResponse.json();
@@ -24,7 +27,7 @@ export async function probeLandingAI({ document, filename, apiKey, parseModel, e
   extractForm.append('schema', JSON.stringify(schema));
   extractForm.append('model', extractModel);
   const extractResponse = await fetchImpl(`${API}/extract`, {
-    method: 'POST', headers, body: extractForm, redirect: 'error',
+    method: 'POST', headers, body: extractForm, redirect: 'error', signal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS),
   });
   if (extractResponse.status !== 200) throw new Error('EXTRACT_FAILED');
   const extracted = await extractResponse.json();

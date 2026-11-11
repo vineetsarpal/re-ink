@@ -26,8 +26,8 @@ from app.services.landingai_service import landingai_service
 from app.models.extraction_job import ExtractionJob
 from app.models.provider_acknowledgment import LANDINGAI_NOTICE_VERSION, ProviderAcknowledgment
 from app.services.private_document_service import private_document_service
-from app.services.workflow_service import create_workflow_job, delete_job, expire_job, retry_job
-from app.services.upload_intents import begin_upload, complete_upload
+from app.services.workflow_service import create_workflow_job, delete_job, expire_job, precheck_upload, retry_job
+from app.services.upload_intents import begin_upload, complete_upload, discard_upload
 from app.services.extraction_quota import quota_usage
 from app.api.endpoints import provider_credentials
 
@@ -66,6 +66,11 @@ async def _upload_trial(file: UploadFile, db: Session, user: CurrentUser):
     notice = db.get(ProviderAcknowledgment, (user.org_id, "landingai"))
     if not notice or notice.notice_version != LANDINGAI_NOTICE_VERSION:
         raise HTTPException(403, "Acknowledge LandingAI processing before uploading")
+    try:
+        precheck_upload(db, user.org_id)
+    except HTTPException:
+        db.commit()
+        raise
     db.commit()
 
     def prepare_intent(job_id, key):
@@ -101,6 +106,13 @@ async def _upload_trial(file: UploadFile, db: Session, user: CurrentUser):
                 private_document_service.delete_original(file_info["storage_key"])
             except Exception:
                 logger.error("Upload orphan requires storage reconciliation")
+            else:
+                try:
+                    bind_session_to_org(db, user.org_id)
+                    discard_upload(db, user.org_id, file_info["job_id"], file_info["storage_key"])
+                    db.commit()
+                except Exception:
+                    db.rollback()
         if isinstance(exc, HTTPException):
             raise
         raise HTTPException(503, "Document could not be queued") from None

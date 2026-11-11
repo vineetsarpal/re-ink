@@ -31,3 +31,13 @@ test('rejects incomplete parse and fallback extraction without exposing provider
   let calls = 0;
   await assert.rejects(probeLandingAI({ ...input, fetchImpl: async () => ++calls === 1 ? response(200, parse) : response(200, { extraction: {}, metadata: { fallback_model_version: 'other' } }) }), /INVALID_EXTRACTION_RESULT/);
 });
+
+test('bounds each provider request with a timeout signal', async () => {
+  const signals = [];
+  await probeLandingAI({ ...input, fetchImpl: async (url, init) => {
+    signals.push(init.signal);
+    return signals.length === 1 ? response(200, parse) : response(200, { extraction: { contract_data: {} } });
+  } });
+  assert.equal(signals.length, 2);
+  assert.ok(signals.every(signal => signal instanceof AbortSignal && !signal.aborted));
+});

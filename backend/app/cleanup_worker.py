@@ -30,7 +30,8 @@ def _scoped_session(factory, org):
 
 def cleanup_next(factory, storage) -> bool:
     """Delete at most one due original while holding its database safety fence."""
-    with factory() as db:
+    with factory.begin() as db:
+        db.execute(text("SET LOCAL statement_timeout = '15s'"))
         org = db.scalar(text("SELECT public.reink_next_cleanup_org()"))
     if org is None:
         return False

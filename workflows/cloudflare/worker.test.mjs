@@ -5,6 +5,7 @@ import { runQueue, runScheduled } from './worker.mjs';
 const env = { REINK_API_ORIGIN: 'https://api.example.test', REINK_WORKER_TOKEN: 'w'.repeat(32), LANDINGAI_PARSE_MODEL: 'parse-v1', LANDINGAI_EXTRACT_MODEL: 'extract-v1' };
 const dispatch = { schema_version: '1', operation: 'extract_reinsurance_contract', job_id: 'job-1', attempt_id: 'attempt-1', capability: 'signed' };
 const json = value => new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } });
+const options = { sleep: async () => {} };
 const message = () => ({ body: dispatch, acked: false, retried: false, ack() { this.acked = true; }, retry() { this.retried = true; } });
 
 test('processes a queue delivery through authenticated backend and LandingAI without exposing the key in the event', async () => {
@@ -95,4 +96,88 @@ test('scheduled maintenance rejects shared scheduler secrets before making reque
   let calls = 0;
   await assert.rejects(runScheduled(config, async () => { calls++; }), /MAINTENANCE_FAILED/);
   assert.equal(calls, 0);
+});
+
+function backend(overrides = {}) {
+  const calls = [];
+  const fetchImpl = async (url, init = {}) => {
+    calls.push([url, init]);
+    for (const [suffix, handler] of Object.entries(overrides)) if (url.endsWith(suffix)) { const r = await handler(calls.filter(([u]) => u.endsWith(suffix)).length, init); if (r) return r; }
+    if (url.endsWith('/claim')) return json({ decision: 'start', checkpoint_token: 'claim-token' });
+    if (url.endsWith('/credential')) return json({ api_key: 'customer-secret' });
+    if (url.endsWith('/document')) return new Response('%PDF-fake', { headers: { 'content-type': 'application/pdf' } });
+    if (url.endsWith('/ade/parse')) return json({ markdown: 'Treaty', chunks: [], grounding: {}, metadata: { version: 'parse-v1' } });
+    if (url.endsWith('/ade/extract')) return json({ extraction: { contract_name: 'Treaty', contract_type: 'Treaty', cedant_name: 'Cedant', reinsurer_name: 'Reinsurer' }, metadata: { version: 'extract-v1' } });
+    if (url.endsWith('/checkpoint')) return json({ stored: true });
+    if (url.endsWith('/deliver')) return json({ schema_version: '1', event_id: 'terminal', status: 'acknowledged' });
+    throw new Error('unexpected URL');
+  };
+  const count = suffix => calls.filter(([url]) => url.endsWith(suffix)).length;
+  const checkpointed = () => JSON.parse(calls.find(([url]) => url.endsWith('/checkpoint'))[1].body);
+  return { calls, fetchImpl, count, checkpointed };
+}
+
+test('every queue-path request carries a timeout signal', async () => {
+  const { calls, fetchImpl } = backend();
+  const item = message();
+  await runQueue({ messages: [item] }, env, fetchImpl, options);
+  assert.equal(item.acked, true);
+  assert.equal(calls.length, 7);
+  for (const [url, init] of calls) assert.ok(init.signal instanceof AbortSignal, url);
+});
+
+test('transient credential and document failures are retried before the single provider call', async () => {
+  const { fetchImpl, count, checkpointed } = backend({
+    '/credential': n => n === 1 ? new Response('busy', { status: 503 }) : null,
+    '/document': n => { if (n === 1) throw new TypeError('network connection lost'); return null; },
+  });
+  const item = message();
+  await runQueue({ messages: [item] }, env, fetchImpl, options);
+  assert.equal(count('/credential'), 2);
+  assert.equal(count('/document'), 2);
+  assert.equal(count('/ade/parse'), 1);
+  assert.equal(checkpointed().status, 'completed');
+  assert.equal(item.acked, true);
+});
+
+test('a persistent pre-provider outage records a retryable failure without calling the provider', async () => {
+  const { calls, fetchImpl, count, checkpointed } = backend({
+    '/document': () => { throw new DOMException('timed out', 'TimeoutError'); },
+  });
+  const item = message();
+  await runQueue({ messages: [item] }, env, fetchImpl, options);
+  assert.equal(count('/document'), 3);
+  assert.equal(calls.some(([url]) => url.startsWith('https://api.va.landing.ai/')), false);
+  assert.deepEqual(checkpointed().error, { code: 'PREPARATION_FAILED', message: 'Document preparation failed before provider processing.', retryable: true });
+  assert.equal(item.acked, true);
+});
+
+test('a rejected credential request is not retried and is not retryable', async () => {
+  const { fetchImpl, count, checkpointed } = backend({ '/credential': () => new Response('gone', { status: 409 }) });
+  const item = message();
+  await runQueue({ messages: [item] }, env, fetchImpl, options);
+  assert.equal(count('/credential'), 1);
+  assert.equal(checkpointed().error.retryable, false);
+});
+
+test('provider failures are never retried by the worker', async () => {
+  const { fetchImpl, count, checkpointed } = backend({ '/ade/parse': () => new Response('busy', { status: 503 }) });
+  const item = message();
+  await runQueue({ messages: [item] }, env, fetchImpl, options);
+  assert.equal(count('/ade/parse'), 1);
+  assert.equal(count('/ade/extract'), 0);
+  assert.deepEqual(checkpointed().error, { code: 'EXTRACTION_FAILED', message: 'Document extraction failed.', retryable: false });
+  assert.equal(item.acked, true);
+});
+
+test('a transient checkpoint failure is retried with the same token and event', async () => {
+  const { calls, fetchImpl, count } = backend({ '/checkpoint': n => n === 1 ? new Response('busy', { status: 502 }) : null });
+  const item = message();
+  await runQueue({ messages: [item] }, env, fetchImpl, options);
+  const checkpoints = calls.filter(([url]) => url.endsWith('/checkpoint'));
+  assert.equal(checkpoints.length, 2);
+  assert.equal(checkpoints[0][1].body, checkpoints[1][1].body);
+  assert.equal(checkpoints[1][1].headers['X-Checkpoint-Token'], 'claim-token');
+  assert.equal(count('/ade/parse'), 1);
+  assert.equal(item.acked, true);
 });

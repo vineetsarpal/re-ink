@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     EXTRACTION_ATTEMPTS_PER_MINUTE: int = Field(default=10, ge=1)
     EXTRACTION_GLOBAL_TRIAL_MONTHLY_LIMIT: int = Field(default=0, ge=0)
     EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT: int = Field(default=0, ge=0)
+    CLEANUP_BATCH_LIMIT: int = Field(default=25, ge=1, le=200)
+    CLEANUP_TIME_BUDGET_SECONDS: float = Field(default=10, gt=0, le=12)
     LANDINGAI_TRIAL_API_KEY: str = Field(default="", repr=False)
     WORKFLOW_QUEUE_TIMEOUT_SECONDS: int = Field(default=600, gt=0)
     WORKFLOW_PROCESSING_TIMEOUT_SECONDS: int = Field(default=600, gt=0)

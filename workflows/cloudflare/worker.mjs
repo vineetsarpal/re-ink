@@ -8,6 +8,29 @@ import { parseLanding, normalizeLanding } from './normalizers.mjs';
 
 const MAX_DOCUMENT = 5 * 1024 * 1024;
 const MAX_RESPONSE = 8 * 1024 * 1024;
+// Backend statements are capped at 15s; R2 reads may take longer.
+const BACKEND_TIMEOUT_MS = 15000;
+const DOCUMENT_TIMEOUT_MS = 30000;
+const PREPARE_DELAYS = [250, 1000];
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+class RemoteError extends Error {
+  constructor(status) { super('REMOTE_REQUEST_FAILED'); this.status = status; }
+}
+
+function transient(error) {
+  return error instanceof TypeError || ['TimeoutError', 'AbortError'].includes(error?.name) ||
+    error?.status === 429 || error?.status >= 500;
+}
+
+async function retrying(operation, sleep) {
+  for (let attempt = 0; ; attempt++) {
+    try { return await operation(); } catch (error) {
+      if (attempt >= PREPARE_DELAYS.length || !transient(error)) throw error;
+      await sleep(PREPARE_DELAYS[attempt]);
+    }
+  }
+}
 
 async function boundedBytes(response, limit) {
   const declared = response.headers.get('content-length');
@@ -32,7 +55,7 @@ async function boundedBytes(response, limit) {
 }
 
 async function readJson(response, limit = MAX_RESPONSE) {
-  if (response.status !== 200) throw new Error('REMOTE_REQUEST_FAILED');
+  if (response.status !== 200) throw new RemoteError(response.status);
   return JSON.parse(new TextDecoder().decode(await boundedBytes(response, limit)));
 }
 
@@ -50,24 +73,31 @@ function settings(env) {
   return { origin, token: env.REINK_WORKER_TOKEN, parseModel: env.LANDINGAI_PARSE_MODEL, extractModel: env.LANDINGAI_EXTRACT_MODEL };
 }
 
-function services(env, fetchImpl) {
+function services(env, fetchImpl, { sleep = wait } = {}) {
   const config = settings(env);
   const endpoint = (dispatch, action) => `${config.origin}/api/cloudflare/jobs/${encodeURIComponent(dispatch.job_id)}/attempts/${encodeURIComponent(dispatch.attempt_id)}/${action}`;
-  const call = (dispatch, action, options = {}) => fetchImpl(endpoint(dispatch, action), {
-    ...options, redirect: 'error', headers: { Authorization: `Bearer ${config.token}`, 'X-Dispatch-Capability': dispatch.capability, ...options.headers },
+  const call = (dispatch, action, { timeout = BACKEND_TIMEOUT_MS, ...options } = {}) => fetchImpl(endpoint(dispatch, action), {
+    ...options, redirect: 'error', signal: AbortSignal.timeout(timeout), headers: { Authorization: `Bearer ${config.token}`, 'X-Dispatch-Capability': dispatch.capability, ...options.headers },
   });
   return {
     async claim(dispatch) { return readJson(await call(dispatch, 'claim', { method: 'POST' }), 16384); },
     async extract(dispatch, checkpointToken) {
       const headers = { 'X-Checkpoint-Token': checkpointToken };
-      const credential = await readJson(await call(dispatch, 'credential', { headers }), 16384);
-      if (typeof credential.api_key !== 'string' || !credential.api_key) throw new Error('INVALID_CREDENTIAL');
-      const document = await call(dispatch, 'document', { headers });
-      if (document.status !== 200) throw new Error('DOCUMENT_UNAVAILABLE');
-      const mime = (document.headers.get('content-type') ?? '').split(';')[0].trim();
       const extensions = { 'application/pdf': 'pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx' };
-      if (!extensions[mime]) throw new Error('UNSUPPORTED_DOCUMENT');
-      const blob = new Blob([await boundedBytes(document, MAX_DOCUMENT)], { type: mime });
+      let credential, blob, mime;
+      try {
+        credential = await retrying(async () => readJson(await call(dispatch, 'credential', { headers }), 16384), sleep);
+        if (typeof credential.api_key !== 'string' || !credential.api_key) throw new Error('INVALID_CREDENTIAL');
+        blob = await retrying(async () => {
+          const document = await call(dispatch, 'document', { headers, timeout: DOCUMENT_TIMEOUT_MS });
+          if (document.status !== 200) throw new RemoteError(document.status);
+          mime = (document.headers.get('content-type') ?? '').split(';')[0].trim();
+          if (!extensions[mime]) throw new Error('UNSUPPORTED_DOCUMENT');
+          return new Blob([await boundedBytes(document, MAX_DOCUMENT)], { type: mime });
+        }, sleep);
+      } catch (error) {
+        throw Object.assign(new Error('PREPARATION_FAILED'), { preProvider: true, retryable: transient(error) });
+      }
       // Bound provider JSON before the probe parses it; never log remote bodies.
       const providerFetch = async (url, options) => {
         const response = await fetchImpl(url, options);
@@ -93,11 +123,11 @@ function services(env, fetchImpl) {
   };
 }
 
-export async function runQueue(batch, env, fetchImpl = fetch) {
+export async function runQueue(batch, env, fetchImpl = fetch, options = {}) {
   let adapter;
-  try { adapter = services(env, fetchImpl); }
+  try { adapter = services(env, fetchImpl, options); }
   catch { for (const message of batch.messages) message.retry(); return; }
-  await consumeBatch(batch, adapter);
+  await consumeBatch(batch, adapter, options);
 }
 
 export async function runScheduled(env, fetchImpl = fetch) {

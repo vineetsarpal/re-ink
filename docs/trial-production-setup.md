@@ -58,8 +58,37 @@ requests for the same user, but a crash or ambiguous WorkOS failure after an
 organization is created can still leave an orphan or duplicate; establish a
 reconciliation procedure before public launch.
 
-Expired uploads retain permanent tombstones and are revisited for late storage
-writes every 24 hours. Failed deletions retry after five minutes. This relies
-on the cleanup scheduler continuing to run and creates ongoing database and
-storage-operation costs; monitor backlog and capacity. A finite cleanup time
-is not guaranteed if storage writes can remain pending indefinitely.
+Expired uploads keep tombstones that are revisited for late storage writes
+every 24 hours. Once a successful rescan happens at least 7 days after the
+upload lease deadline, the row is marked `deleted` and never rescanned (rows
+are retained, not removed). Uploads deleted in the request itself are marked
+`deleted` immediately. Failed deletions retry after five minutes without a
+limit, so monitor failing rows. Each scheduler call processes up to
+`CLEANUP_BATCH_LIMIT` (default 25) items, alternating fairly between upload
+tombstones and revoked originals, and starts no new item after
+`CLEANUP_TIME_BUDGET_SECONDS` (default 10; the Cloudflare caller aborts at 45s).
+
+Over-quota uploads are rejected before any storage write. Those rejections
+count toward `EXTRACTION_ATTEMPTS_PER_MINUTE`, so retry loops get 429 with
+`Retry-After`.
+
+### Migration 0015 (`0015_trial_hardening`)
+
+Apply over the direct owner connection after 0014: `uv run alembic upgrade head`.
+It runs plain `CREATE INDEX` (short write locks, with a 10s `lock_timeout`;
+the tables are small), adds the `deleted` upload-intent status, sets
+`search_path = pg_catalog, pg_temp` on every `reink_*` SECURITY DEFINER
+function, and revokes EXECUTE on them (and all access to `cleanup_turn`) from
+`reink_app` if that role exists. No function signature changes, so existing
+maintenance roles keep their grants and the provisioning scripts need not be
+rerun. Afterwards confirm that this returns no rows:
+
+```sql
+SELECT p.oid::regprocedure FROM pg_proc p
+WHERE p.prosecdef AND p.proname LIKE 'reink\_%'
+  AND has_function_privilege('reink_app', p.oid, 'EXECUTE');
+```
+
+The migration does not change owner default privileges. A SECURITY DEFINER
+function added by a later migration must revoke access from `reink_app`
+explicitly, or the owner's default privileges should be adjusted separately.

@@ -35,8 +35,12 @@ def test_cleanup_scheduler_requires_auth_and_limits_work(monkeypatch):
     assert clean.call_count == 0
     response = client.post("/maintenance/cleanup", headers={"Authorization": "Bearer " + "x" * 40})
     assert response.status_code == 200
+    assert response.json() == {"processed": settings.CLEANUP_BATCH_LIMIT}
+    assert clean.call_count == settings.CLEANUP_BATCH_LIMIT
+    clock = iter([0.0, 0.0, 999.0])
+    monkeypatch.setattr(cleanup_maintenance, "monotonic", lambda: next(clock))
+    response = client.post("/maintenance/cleanup", headers={"Authorization": "Bearer " + "x" * 40})
     assert response.json() == {"processed": 1}
-    assert clean.call_count == 1
 
 
 @pytest.mark.parametrize("scenario", ["live_job", "mismatched_key"])

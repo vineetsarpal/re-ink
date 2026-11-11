@@ -1,5 +1,16 @@
 // This module requires a durable coordinator; it is not wired to a deployment.
 export const MAX_EVENT = 5 * 1024 * 1024;
+// Bounded backoff (4 attempts, ~4.25s of waiting) for idempotent backend calls.
+export const RETRY_DELAYS = [250, 1000, 3000];
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+async function confirmed(operation, sleep, delays) {
+  for (let attempt = 0; ; attempt++) {
+    try { if (await operation() === true) return true; } catch {}
+    if (attempt >= delays.length) return false;
+    await sleep(delays[attempt]);
+  }
+}
 
 function validDispatch(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value) &&
@@ -10,7 +21,8 @@ function validDispatch(value) {
       value[key].trim() && value[key].length <= 128 && !/[\x00-\x1f\x7f]/.test(value[key]));
 }
 
-export async function consumeBatch(batch, services) {
+export async function consumeBatch(batch, services, { sleep = wait, delays = RETRY_DELAYS } = {}) {
+  const deliver = (event, body) => confirmed(() => services.deliver(event, body), sleep, delays);
   for (const message of batch.messages) {
     if (!validDispatch(message.body)) {
       message.ack();
@@ -30,7 +42,7 @@ export async function consumeBatch(batch, services) {
           message.retry();
           continue;
         }
-        if (await services.deliver(event, message.body) === true) message.ack();
+        if (await deliver(event, message.body)) message.ack();
         else message.retry();
         continue;
       }
@@ -46,15 +58,17 @@ export async function consumeBatch(batch, services) {
         if (new TextEncoder().encode(JSON.stringify(event)).byteLength > MAX_EVENT) {
           throw new Error('RESULT_TOO_LARGE');
         }
-      } catch {
-        event = { ...event, status: 'failed', error: { code: 'EXTRACTION_FAILED',
-          message: 'Document extraction failed.', retryable: false } };
+      } catch (error) {
+        // The one-shot claim is spent, so a pre-provider failure is recorded rather than redelivered.
+        event = { ...event, status: 'failed', error: error?.preProvider === true
+          ? { code: 'PREPARATION_FAILED', message: 'Document preparation failed before provider processing.', retryable: error.retryable === true }
+          : { code: 'EXTRACTION_FAILED', message: 'Document extraction failed.', retryable: false } };
       }
-      if (await services.checkpoint(message.body, claim.checkpoint_token, event) !== true) {
+      if (!await confirmed(() => services.checkpoint(message.body, claim.checkpoint_token, event), sleep, delays)) {
         message.retry();
         continue;
       }
-      if (await services.deliver(event, message.body) === true) message.ack();
+      if (await deliver(event, message.body)) message.ack();
       else message.retry();
     } catch {
       message.retry();

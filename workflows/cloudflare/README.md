@@ -21,7 +21,18 @@ These rules prevent this consumer from deliberately repeating a provider call on
 
 The worker buffers documents and responses. It currently rejects documents larger than 5 MiB, and caps provider responses at 8 MiB, as conservative prototype limits; these do not establish that it is safe under Cloudflare's 128 MiB per-isolate limit with concurrent messages. Runtime testing and a concurrency limit are required before deployment. When the Cloudflare trial gate is enabled, the API and upload UI also enforce a 5 MiB document limit.
 
-An oversized terminal result is checkpointed as a generic failure. A result rejected by the backend contract, or an ambiguous checkpoint transport failure, can still leave the claimed attempt in progress until expiry; neither condition should trigger another provider call for that attempt. Validate the live provider response against the backend contract before enabling the trial.
+An oversized terminal result is checkpointed as a generic failure. A result rejected by the backend contract, or an ambiguous checkpoint transport failure, can still leave the claimed attempt in progress until expiry; neither condition should trigger another provider call for that attempt.
+
+## Retries and timeouts
+
+Every queue-path request has an `AbortSignal.timeout`: 15 s for backend JSON calls (matching the backend statement timeout), 30 s for the document download, 180 s for LandingAI parse and 120 s for extract. These keep the worst case after a claim (about 500 s including retries) inside the backend's default 600 s `WORKFLOW_PROCESSING_TIMEOUT_SECONDS` and Cloudflare's 15-minute queue consumer wall-clock limit. Raise them only together with that deadline.
+
+- Checkpoint and deliver are retried in the same invocation (4 attempts, 250 ms / 1 s / 3 s backoff) with the same token and event, because both are idempotent. Only after that does the message fall back to `retry()`; a redelivery can then deliver a stored checkpoint, but an unstored one stays `in_progress` until expiry.
+- Credential and document fetches are retried in the same invocation (3 attempts, 250 ms / 1 s) on network errors, timeouts, 429 and 5xx. Other statuses, such as 409 for an inactive attempt, are not retried.
+- The claim has already spent the one-shot token and counted any trial start, so a redelivery could never start this attempt again. A persistent failure before the provider call is therefore checkpointed as `PREPARATION_FAILED` (with `retryable: true` when it was transient) instead of using `retry()`, which would only leave the attempt stuck until expiry.
+- LandingAI calls are never retried; any failure after the provider request starts is checkpointed as `EXTRACTION_FAILED`.
+
+The backend sizes the machine-route database pool per process with `CLOUDFLARE_MACHINE_POOL_SIZE` (default 2), `CLOUDFLARE_MACHINE_POOL_MAX_OVERFLOW` (default 1) and `CLOUDFLARE_MACHINE_POOL_TIMEOUT_SECONDS` (default 5). The defaults suit `max_concurrency = 1`, with room for a retry that overlaps a request the Worker abandoned on timeout. Raise them in step with `max_concurrency`, within the database's connection limit. Validate the live provider response against the backend contract before enabling the trial.
 
 ## Deployment preparation
 
