@@ -468,3 +468,47 @@ revision/function/ACL before deploying compatible code. The next ordinary CI
 `upgrade head` will reapply 0016 if its file remains, so do not release the CI
 hold until the intended schema target is agreed. Neither path changes roles or
 grants; stop for approval if production privileges prove insufficient.
+
+## Orphan organization reconciliation (weekly)
+
+Crash-safe provisioning makes duplicates unlikely but not impossible, so run the
+read-only orphan report weekly (append a calendar reminder if monitoring has not
+replaced it yet). The report lists users with more than one organization,
+organizations with zero members, and provisioning intents not `completed` after
+one hour. It only reads WorkOS and the database and never creates, updates or
+deletes anything.
+
+```sh
+cd backend
+WORKOS_API_KEY=... DATABASE_URL=postgresql+psycopg://reink_app:...@.../reink \
+    uv run python ../deploy/report_orphan_orgs.py
+```
+
+Supply the production WorkOS secret and the application database URL at runtime;
+do not commit credentials or the report output (it contains user identifiers).
+
+Resolve findings by hand, in this order:
+
+1. **Stale provisioning intents** (`pending`/`org_created`, not updated for an
+   hour). `pending` with no org: ask the user to retry sign-in, which resumes
+   with the same idempotency key. `org_created` with an organization: have the
+   user retry sign-in so the membership is created and the intent completes.
+   Only mark an intent `completed` manually (migration-owner SQL on
+   `provisioning_intents`) if the user already has their organization and a
+   retry cannot help; record what you changed.
+2. **Organizations with zero members.** Usually a crash between creating the
+   WorkOS organization and creating the membership. First check the database
+   for tenant data under that `org_id` (extraction jobs, contracts, parties,
+   quota row). If any exists, do not delete the WorkOS organization; restore a
+   membership or use organization closure so the purge removes the data. If
+   there is none and a later attempt gave the user a different organization,
+   delete the empty organization in the WorkOS dashboard. If the user should
+   have that organization, create the missing membership there instead.
+3. **Users with more than one organization.** Identify the organization in real
+   use (has documents, quota usage, recent sign-ins) and confirm with the user
+   which one to keep. Remove the extra membership (and, if it is an orphan
+   duplicate, the organization) via the WorkOS dashboard or API. Removing the
+   wrong membership can lock a user out of their data, so do not guess.
+
+Re-run the report after reconciling; it should come back all clear. Escalate a
+finding you cannot explain rather than deleting anything destructive.
