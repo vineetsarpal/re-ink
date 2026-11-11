@@ -29,6 +29,7 @@ def orgless_user(monkeypatch):
     # The provisioning endpoint requires WORKOS_API_KEY to be configured; set a
     # dummy so tests don't depend on a local .env (CI has none). The WorkOS
     # client itself is stubbed per test.
+    monkeypatch.setattr(settings, "TRIAL_IDENTITY_HASH_KEY", "test-identity-key")
     monkeypatch.setattr(settings, "WORKOS_API_KEY", "dummy-key")
     app.dependency_overrides[get_authenticated_user] = lambda: CurrentUser(
         user_id="user_new", org_id=None

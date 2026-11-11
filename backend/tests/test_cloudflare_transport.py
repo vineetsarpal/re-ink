@@ -1,3 +1,4 @@
+from conftest import seed_trial_quota
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -17,6 +18,7 @@ WORKER_TOKEN = "worker-token-" + "x" * 32
 @pytest.fixture
 def machine_client(db_session):
     bind_session_to_org(db_session, "org-alpha")
+    seed_trial_quota(db_session, "org-alpha")
     now = datetime.now(timezone.utc)
     db_session.add(ExtractionJob(job_id="job-a", org_id="org-alpha", status="queued", selected_attempt_id="attempt-a", filename="contract.pdf", content_type="application/pdf", storage_key="object-a", size_bytes=7, sha256="a" * 64))
     db_session.flush()
@@ -102,6 +104,7 @@ def test_delivery_applies_checkpoint_once_and_acknowledges_replay(machine_client
         assert response.status_code == 200, response.text
         assert response.json() == {"schema_version": "1", "event_id": "terminal", "status": "acknowledged"}
     bind_session_to_org(db_session, "org-alpha")
+    seed_trial_quota(db_session, "org-alpha")
     assert db_session.get(ExtractionJob, "job-a").status == "failed"
 
 
@@ -161,12 +164,14 @@ def test_expired_attempt_transition_is_committed_before_rejection(machine_client
     claim = machine_client.post(base + "/claim", headers=headers)
     headers["X-Checkpoint-Token"] = claim.json()["checkpoint_token"]
     bind_session_to_org(db_session, "org-alpha")
+    seed_trial_quota(db_session, "org-alpha")
     attempt = db_session.get(ExtractionAttempt, "attempt-a")
     attempt.deadline_at = datetime.now(timezone.utc) - timedelta(seconds=1)
     db_session.commit()
     response = machine_client.get(base + "/credential", headers=headers)
     assert response.status_code == 409
     bind_session_to_org(db_session, "org-alpha")
+    seed_trial_quota(db_session, "org-alpha")
     assert db_session.get(ExtractionAttempt, "attempt-a").status == "timed_out"
 
 
@@ -176,11 +181,13 @@ def test_expired_checkpoint_commits_timeout_before_rejection(machine_client, db_
     claim = machine_client.post(base + "/claim", headers=headers)
     headers["X-Checkpoint-Token"] = claim.json()["checkpoint_token"]
     bind_session_to_org(db_session, "org-alpha")
+    seed_trial_quota(db_session, "org-alpha")
     db_session.get(ExtractionAttempt, "attempt-a").deadline_at = datetime.now(timezone.utc) - timedelta(seconds=1)
     db_session.commit()
     event = {"schema_version": "1", "job_id": "job-a", "attempt_id": "attempt-a", "event_id": "terminal", "status": "failed", "error": {"code": "EXTRACTION_FAILED", "message": "Extraction failed.", "retryable": False}}
     assert machine_client.post(base + "/checkpoint", headers=headers, json=event).status_code == 409
     bind_session_to_org(db_session, "org-alpha")
+    seed_trial_quota(db_session, "org-alpha")
     assert db_session.get(ExtractionAttempt, "attempt-a").status == "timed_out"
 
 
@@ -193,6 +200,7 @@ def test_preparation_does_not_spend_start_and_provider_authorization_is_one_shot
     grant = machine_client.post(base + "/claim", headers=headers)
     assert grant.status_code == 200
     bind_session_to_org(db_session, "org-alpha")
+    seed_trial_quota(db_session, "org-alpha")
     assert db_session.get(GlobalQuota, 1).trial_starts == 0
     assert not db_session.get(QuotaReservation, ("org-alpha", "attempt-a")).provider_started
     headers["X-Checkpoint-Token"] = "wrong"
@@ -203,6 +211,7 @@ def test_preparation_does_not_spend_start_and_provider_authorization_is_one_shot
     assert started.json() == {"authorized": True}
     assert machine_client.post(base + "/provider-start", headers=headers).status_code == 409
     bind_session_to_org(db_session, "org-alpha")
+    seed_trial_quota(db_session, "org-alpha")
     assert db_session.get(GlobalQuota, 1).trial_starts == 1
 
 
@@ -222,6 +231,7 @@ def test_preparation_failure_or_cap_denial_settles_without_spending_a_start(mach
     assert machine_client.post(base + "/provider-start", headers=headers).status_code == 403
     assert machine_client.post(base + "/deliver", headers=headers).status_code == 200
     bind_session_to_org(db_session, "org-alpha")
+    seed_trial_quota(db_session, "org-alpha")
     assert db_session.get(GlobalQuota, 1).trial_starts == 0
     assert db_session.get(GlobalQuota, 1).trial_pending == 0
     assert db_session.get(QuotaReservation, ("org-alpha", "attempt-a")).status == "failed"
@@ -236,6 +246,7 @@ def test_incompatible_worker_cannot_claim(machine_client, db_session, version):
     response = machine_client.post("/cloudflare/jobs/job-a/attempts/attempt-a/claim", headers=headers)
     assert response.status_code == 409, response.text
     bind_session_to_org(db_session, "org-alpha")
+    seed_trial_quota(db_session, "org-alpha")
     assert db_session.get(CloudflareExecution, "attempt-a") is None
     assert db_session.get(ExtractionJob, "job-a").status == "queued"
     from app.models.extraction_quota import GlobalQuota, QuotaReservation
@@ -250,4 +261,5 @@ def test_protocol_probe_does_not_claim(machine_client, db_session):
     assert response.status_code == 200, response.text
     assert response.json() == {"protocol_version": "2"}
     bind_session_to_org(db_session, "org-alpha")
+    seed_trial_quota(db_session, "org-alpha")
     assert db_session.get(CloudflareExecution, "attempt-a") is None

@@ -16,6 +16,7 @@ class GlobalQuota(Base):
 class OrganizationQuota(Base):
     __tablename__ = "extraction_quota_org"
     org_id = Column(String(255), primary_key=True)
+    trial_eligible = Column(Boolean, nullable=False, server_default="false")
     month = Column(Date, nullable=False)
     monthly_successes = Column(Integer, nullable=False)
     monthly_attempts = Column(Integer, nullable=False)
@@ -42,3 +43,15 @@ class ExtractionRate(Base):
     window_start = Column(DateTime(timezone=True), nullable=False)
     attempts = Column(Integer, nullable=False)
     __table_args__ = (CheckConstraint("attempts >= 0"),)
+
+
+class TrialUser(Base):
+    __tablename__ = "trial_users"
+    user_hash = Column(String(64), primary_key=True)
+    org_id = Column(String(255), nullable=False)
+
+
+class TrialDomain(Base):
+    __tablename__ = "trial_domains"
+    domain = Column(String(255), primary_key=True)
+    org_id = Column(String(255), nullable=False)

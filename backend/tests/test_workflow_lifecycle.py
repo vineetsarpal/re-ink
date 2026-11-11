@@ -1,4 +1,5 @@
 """Lifecycle integration tests use independent real PostgreSQL connections."""
+from conftest import seed_trial_quota
 from datetime import timedelta
 import uuid
 import pytest
@@ -74,6 +75,7 @@ def test_quota_reservation_tracks_success_and_failure(sessions, monkeypatch):
     monkeypatch.setattr(settings, "LANDINGAI_TRIAL_API_KEY", "trial-test-key")
     make, org = sessions
     db = make()
+    seed_trial_quota(db, org)
     first = create(db, org)
     second = create(db, org)
     assert quota_usage(db, org).pending == 2
@@ -94,6 +96,7 @@ def test_quota_releases_on_timeout_and_delete_and_reserves_on_retry(sessions, mo
     monkeypatch.setattr(settings, "LANDINGAI_TRIAL_API_KEY", "trial-test-key")
     make, org = sessions
     db = make()
+    seed_trial_quota(db, org)
     timed_out = create(db, org)
     deleted = create(db, org)
     attempt = db.get(ExtractionAttempt, timed_out.selected_attempt_id)
@@ -145,6 +148,7 @@ def test_missing_trial_credential_fails_closed_and_rolls_back_reservation(sessio
     monkeypatch.setattr(settings, "LANDINGAI_TRIAL_API_KEY", "")
     make, org = sessions
     db = make()
+    seed_trial_quota(db, org)
     with pytest.raises(HTTPException) as exc:
         create(db, org)
     assert exc.value.status_code == 503

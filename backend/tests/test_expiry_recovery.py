@@ -1,4 +1,5 @@
 """Maintenance recovers expired work without weakening tenant RLS."""
+from conftest import seed_trial_quota
 import base64
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -121,6 +122,7 @@ def test_expiry_maintenance_discovers_tenants_and_releases_reservations(db_sessi
     attempts = []
     for org in orgs:
         bind_session_to_org(db_session, org)
+        seed_trial_quota(db_session, org)
         job = create_workflow_job(db_session, {"job_id": uuid4().hex, "filename": "test.pdf", "storage_key": "key", "content_type": "application/pdf", "size_bytes": 5, "sha256": "a" * 64}, org)
         attempt = db_session.get(ExtractionAttempt, job.selected_attempt_id)
         attempt.deadline_at = datetime(1000, 1, 1, tzinfo=timezone.utc)
@@ -136,6 +138,7 @@ def test_expiry_maintenance_discovers_tenants_and_releases_reservations(db_sessi
                 statuses = []
                 for org, attempt_id in zip(orgs, attempts):
                     bind_session_to_org(db_session, org)
+                    seed_trial_quota(db_session, org)
                     statuses.append(db_session.scalar(select(ExtractionAttempt.status).where(ExtractionAttempt.attempt_id == attempt_id)))
                 if statuses == ["timed_out", "timed_out"]:
                     break
@@ -143,6 +146,7 @@ def test_expiry_maintenance_discovers_tenants_and_releases_reservations(db_sessi
                 pytest.fail("Test jobs were not reached within the bounded sweep")
             for org, attempt_id in zip(orgs, attempts):
                 bind_session_to_org(db_session, org)
+                seed_trial_quota(db_session, org)
                 assert db_session.get(ExtractionAttempt, attempt_id).status == "timed_out"
                 reservation = db_session.get(QuotaReservation, (org, attempt_id))
                 assert reservation.status == "failed"

@@ -2,9 +2,9 @@
 
 `worker.mjs` adapts a Cloudflare queue invocation to the backend machine endpoints and LandingAI. `queue.mjs` contains the delivery boundary and `landingai.mjs` performs provider requests. Run the local mocked checks with `node --test workflows/cloudflare/*.test.mjs`.
 
-This is not deployment-ready: the example queue and cron triggers are disabled, and the backend Cloudflare routes and trial are off by default. Mocked worker tests and simulated backend trials do not establish live provider behavior. Validate the configured environment with synthetic documents before accepting real customer documents.
+The example queue and cron triggers are disabled, and the backend Cloudflare routes and trial are off by default. The production configuration is separate: a [read-only check on 2026-11-11](../../docs/trial-rollout-status-2026-11-11.md) confirmed protocol 2 deployed, trial intake restricted to one allowlisted organization, queue delivery enabled and a configured minute cron. That snapshot records existing extraction evidence and remaining readiness checks; it does not establish public-launch readiness. Mocked worker tests alone do not establish live provider behavior.
 
-The worker requests the same flat provider schema as the production FastAPI LandingAI integration, then maps the response into the review-result envelope. `provider-schema.json` is generated from `get_extraction_schema()` and must stay synchronized with that function. The worker does not transmit raw provider responses: guided intake reads the normalized `parsed_results`, which the backend must persist. Extraction quality and guided intake behavior still need synthetic end-to-end validation before enabling the worker.
+The worker requests the same flat provider schema as the production FastAPI LandingAI integration, then maps the response into the review-result envelope. `provider-schema.json` is generated from `get_extraction_schema()` and must stay synchronized with that function. The worker does not transmit raw provider responses: guided intake reads the normalized `parsed_results`, which the backend must persist. The rollout audit confirmed completed extraction metadata; extraction quality and guided intake behavior still require authenticated UI verification before expanding access.
 
 The runtime expects `REINK_API_ORIGIN`, `REINK_WORKER_TOKEN`, `LANDINGAI_PARSE_MODEL`, and `LANDINGAI_EXTRACT_MODEL`. Its scheduled handler also expects distinct `REINK_DISPATCH_SCHEDULER_TOKEN`, `REINK_EXPIRY_SCHEDULER_TOKEN`, and `REINK_CLEANUP_SCHEDULER_TOKEN` secrets. The scheduled handler tries dispatch, expiry and cleanup independently and reports only a generic failure if either fails. All tokens must be stored as Worker secrets. Queue messages carry a short-lived signed capability, which is also sensitive and must not be logged; they never contain the provider key or document. The backend supplies both only after authenticating the attempt. `business-schema.json` is a pinned copy of the backend machine result schema and must be regenerated when that contract changes.
 
@@ -35,13 +35,14 @@ Every queue-path request has an `AbortSignal.timeout`: 15 s for backend JSON cal
 - Every request uses `redirect: 'manual'` and accepts only status 200, so redirects are never followed. Workers does not implement the Fetch `error` redirect mode: it throws a `TypeError` before sending, which Node does not reproduce.
 - Scheduled failures log one JSON line per failed route (`route` plus HTTP `status` or error type), never tokens or response bodies. View them with `wrangler tail reink-extraction`.
 
-The backend sizes the machine-route database pool per process with `CLOUDFLARE_MACHINE_POOL_SIZE` (default 2), `CLOUDFLARE_MACHINE_POOL_MAX_OVERFLOW` (default 1) and `CLOUDFLARE_MACHINE_POOL_TIMEOUT_SECONDS` (default 5). The defaults suit `max_concurrency = 1`, with room for a retry that overlaps a request the Worker abandoned on timeout. Raise them in step with `max_concurrency`, within the database's connection limit. Validate the live provider response against the backend contract before enabling the trial.
+The backend sizes the machine-route database pool per process with `CLOUDFLARE_MACHINE_POOL_SIZE` (default 2), `CLOUDFLARE_MACHINE_POOL_MAX_OVERFLOW` (default 1) and `CLOUDFLARE_MACHINE_POOL_TIMEOUT_SECONDS` (default 5). The defaults suit `max_concurrency = 1`, with room for a retry that overlaps a request the Worker abandoned on timeout. Raise them in step with `max_concurrency`, within the database's connection limit. Validate the live provider response against the backend contract before expanding trial access.
 
 ## Deployment preparation
 
-[`wrangler.example.toml`](./wrangler.example.toml) is a review-only template. Its queue consumer is commented out and its cron list is empty; copying it alone will not process work. The backend components have default-off gates; their dedicated roles and settings must be provisioned and verified. Validate with synthetic documents, including failure and restart cases. The owner has chosen production resources for the initial trial because the app has no live users.
+[`wrangler.example.toml`](./wrangler.example.toml) is a review-only template. Its queue consumer is commented out and its cron list is empty; copying it alone will not process work. The backend components have default-off gates; their dedicated roles and settings must be provisioned and verified. Validate with synthetic documents, including failure and restart cases. The owner chose production resources for the initial trial when the app had no live users.
 
-When the integration is ready for an authorized test deployment:
+The following steps prepare a separate test deployment from the example template.
+They do not describe pending changes to the already configured production Worker:
 
 1. Copy the template to a local Wrangler configuration, choose a unique Worker name and trusted HTTPS API origin, and set explicitly tested LandingAI parse and extract model versions. The backend and Worker must agree on the business schema and model settings; `.invalid` and `REPLACE_...` are placeholders.
 2. Create separate test queues for extraction and dead letters. In the copied config, replace both names and uncomment the consumer section. Start with `max_batch_size = 1`, `max_concurrency = 1`, `max_retries = 50` and `retry_delay = 30` seconds. These are cautious test settings, **not** verified production limits. A single slow document can delay others until their backend deadlines expire. The dead-letter queue contains signed capabilities: restrict access, set appropriate retention, and investigate expired/ambiguous attempts before any manual replay. See [Cloudflare queue consumer settings](https://developers.cloudflare.com/workers/wrangler/configuration/).
@@ -55,9 +56,12 @@ The existing scheduled request timeout is 45 seconds. Dispatch's budget is check
 
 Follow the [ordered production runbook](../../docs/trial-production-setup.md#coordinated-protocol-2-rollout)
 for the full commands, hidden credential prompts, read-only SQL, protocol probe,
-canary and rollback. CLI syntax was checked against Wrangler **4.160.1**
-([captured local help](../../docs/trial-rollout-wrangler-help.txt)); no production
-operations were run during this review.
+canary and rollback. This is the rollout procedure, not a pending-task checklist;
+see the [verified deployment snapshot](../../docs/trial-rollout-status-2026-11-11.md)
+for observed production state. CLI syntax was checked against Wrangler **4.160.1**
+([captured local help](../../docs/trial-rollout-wrangler-help.txt)); that original
+runbook review performed local checks only. The later rollout audit used
+read-only production checks described in the linked snapshot.
 
 1. On the current backend release, keep trial/Cloudflare/quotas enabled, set
    `TRIAL_ALLOWED_ORGANIZATION_IDS=[]` in FastAPI Cloud and redeploy the same

@@ -1,4 +1,5 @@
 """Organization trial limits through the quota service boundary."""
+from conftest import seed_trial_quota
 from datetime import datetime, timezone
 
 import pytest
@@ -12,6 +13,7 @@ def test_five_free_attempts_are_reserved_and_only_successes_count(db_session):
     org = "trial-quota-organization"
     now = datetime(2026, 11, 10, tzinfo=timezone.utc)
     bind_session_to_org(db_session, org)
+    seed_trial_quota(db_session, org)
     for number in range(5):
         reserve_extraction(db_session, org, f"attempt-{number}", has_customer_key=False, global_trial_limit=100000, at=now)
     with pytest.raises(HTTPException) as error:
@@ -30,6 +32,7 @@ def test_start_cap_blocks_new_free_reservations_but_not_customer_keys(db_session
     org = "global-start-cap-organization"
     now = datetime(2026, 11, 10, tzinfo=timezone.utc)
     bind_session_to_org(db_session, org)
+    seed_trial_quota(db_session, org)
     for number in range(100):
         attempt = f"cap-{number}"
         reserve_extraction(db_session, org, attempt, has_customer_key=False,

@@ -1,3 +1,4 @@
+from conftest import seed_trial_quota
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
@@ -65,6 +66,7 @@ def test_concurrent_extraction_attempts_cannot_exceed_rate_limit(restricted_engi
 
 def test_trial_extraction_counts_only_after_success(db_session):
     bind_session_to_org(db_session, "quota-org-a")
+    seed_trial_quota(db_session, "quota-org-a")
     reservation = reserve_extraction(db_session, "quota-org-a", "attempt-a", has_customer_key=False, global_trial_limit=100, at=NOW)
     assert reservation.funding == "trial"
     assert quota_usage(db_session, "quota-org-a", at=NOW).monthly_successes == 0
@@ -76,6 +78,7 @@ def test_trial_extraction_counts_only_after_success(db_session):
 
 def test_five_free_reservations_block_more_until_a_failure_releases_one(db_session):
     bind_session_to_org(db_session, "quota-org-b")
+    seed_trial_quota(db_session, "quota-org-b")
     for i in range(5):
         reserve_extraction(db_session, "quota-org-b", f"attempt-{i}", has_customer_key=False, global_trial_limit=100, at=NOW)
     with pytest.raises(HTTPException) as exc:
@@ -120,6 +123,7 @@ def test_concurrent_admissions_cannot_exceed_monthly_capacity(restricted_engine)
 
 def test_month_reset_preserves_free_balance_and_pending_capacity(db_session):
     bind_session_to_org(db_session, "quota-month")
+    seed_trial_quota(db_session, "quota-month")
     reserve_extraction(db_session, "quota-month", "trial", has_customer_key=False, global_trial_limit=100, at=NOW)
     start_provider_call(db_session, "quota-month", "trial", global_trial_call_limit=100, at=NOW)
     settle_extraction(db_session, "quota-month", "trial", success=True, at=NOW)
@@ -137,9 +141,11 @@ def test_global_trial_cap_is_shared_and_does_not_block_customer_keys(db_session)
     from app.models.extraction_quota import GlobalQuota
     db_session.execute(update(GlobalQuota).values(month=NOW.date().replace(day=1), trial_successes=0, trial_pending=0, trial_starts=0))
     bind_session_to_org(db_session, "quota-global-a")
+    seed_trial_quota(db_session, "quota-global-a")
     reserve_extraction(db_session, "quota-global-a", "attempt-a", has_customer_key=False, global_trial_limit=1, at=NOW)
     db_session.flush()
     bind_session_to_org(db_session, "quota-global-b")
+    seed_trial_quota(db_session, "quota-global-b")
     with pytest.raises(HTTPException) as exc:
         reserve_extraction(db_session, "quota-global-b", "attempt-b", has_customer_key=False, global_trial_limit=1, at=NOW)
     assert exc.value.status_code == 429
@@ -162,6 +168,7 @@ def test_failed_trial_provider_calls_still_count_toward_global_call_cap(db_sessi
     from app.services.extraction_quota import start_provider_call
     db_session.execute(update(GlobalQuota).values(month=NOW.date().replace(day=1), trial_successes=0, trial_pending=0, trial_starts=0))
     bind_session_to_org(db_session, "quota-start-a")
+    seed_trial_quota(db_session, "quota-start-a")
     reserve_extraction(db_session, "quota-start-a", "attempt-a", has_customer_key=False, global_trial_limit=20, at=NOW)
     start_provider_call(db_session, "quota-start-a", "attempt-a", global_trial_call_limit=1, at=NOW)
     # Redelivery of the same attempt must not count as another call.
@@ -178,6 +185,7 @@ def test_failed_trial_provider_calls_still_count_toward_global_call_cap(db_sessi
 @pytest.mark.parametrize("success", [True, False])
 def test_unstarted_reservation_only_accepts_failure(db_session, success):
     bind_session_to_org(db_session, "unstarted-org")
+    seed_trial_quota(db_session, "unstarted-org")
     reservation = reserve_extraction(db_session, "unstarted-org", "unstarted", has_customer_key=False, global_trial_limit=100)
     if success:
         with pytest.raises(HTTPException) as exc:

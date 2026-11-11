@@ -235,6 +235,7 @@ export const UploadPage: React.FC = () => {
       <div className="step-content">
         {currentStep === 'upload' && (
           <>
+            {trialMode && usage?.trial_eligible === false && !usage.has_customer_key && <p role="status">Free extractions are not available for this organization; add a LandingAI key.</p>}
             {trialMode && usage && <p>{usage.monthly_successes} of {usage.monthly_limit} monthly extractions used; {usage.free_remaining} free trial extractions remain.</p>}
             {trialMode && noticeError && <p role="alert">Unable to load or save the processing acknowledgment. Please refresh and try again.</p>}
             {trialMode && !noticeError && acknowledged === null && <p>Checking processing acknowledgment…</p>}
@@ -278,6 +279,8 @@ export const UploadPage: React.FC = () => {
         {currentStep === 'processing' && uploadResponse && (
           <ExtractionStatus
             jobId={uploadResponse.job_id}
+            trialEligible={usage?.trial_eligible}
+            hasCustomerKey={usage?.has_customer_key}
             allowRetry={trialMode && !isMockJob}
             onComplete={handleExtractionComplete}
             onError={(error) => {
