@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@workos-inc/authkit-react';
 import { SecondarySidebarProvider } from '@/components/SecondarySidebar';
+import { organizationApi, type OrganizationLifecycle } from '@/services/api';
 import { AccountPanel } from '@/components/AccountPanel';
 import logoMark from '@/assets/logo-mark-small.png';
 import logoWordmark from '@/assets/logo-wordmark-small.png';
@@ -41,7 +42,36 @@ const displayVersion = __APP_VERSION__.split('.').slice(0, 2).join('.');
 
 export const Layout: React.FC = () => {
   const location = useLocation();
-  const { user, signOut, permissions } = useAuth();
+  const { user, signOut, permissions, organizationId } = useAuth();
+  const [lifecycle, setLifecycle] = useState<OrganizationLifecycle | null>(null);
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  useEffect(() => {
+    let active = true;
+    let version = 0;
+    setLifecycle(null);
+    setLifecycleError(null);
+    const refresh = () => {
+      const requestVersion = ++version;
+      return organizationApi.lifecycle().then((value) => {
+        if (active && version === requestVersion) { setLifecycle(value); setLifecycleError(null); }
+      }).catch(() => { if (active && version === requestVersion) setLifecycleError('Unable to check organization status. Please refresh and try again.'); });
+    };
+    const changed = (event: Event) => {
+      version += 1;
+      if (active) setLifecycle((event as CustomEvent<OrganizationLifecycle>).detail);
+    };
+    window.addEventListener('organization-lifecycle', changed);
+    window.addEventListener('focus', refresh);
+    void refresh();
+    const interval = window.setInterval(refresh, 30000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.removeEventListener('organization-lifecycle', changed);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [organizationId]);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false);
@@ -97,6 +127,25 @@ export const Layout: React.FC = () => {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [signOutConfirmOpen]);
+
+  if (!lifecycle) return <main className="page-container"><p role={lifecycleError ? 'alert' : 'status'}>{lifecycleError ?? 'Checking organization status…'}</p></main>;
+  if (lifecycle.status !== 'active') return <main className="page-container">
+    <section className="members-card">
+      <h1>{lifecycle.status === 'closing' ? 'This organization is closing' : 'This organization has been closed'}</h1>
+      {lifecycle.purge_after && <p>Scheduled deletion: {new Date(lifecycle.purge_after).toLocaleString()}.</p>}
+      <p>Provider-side copies are governed by LandingAI’s terms.</p>
+      {lifecycleError && <p role="alert">{lifecycleError}</p>}
+      {permissions.includes('organization:close') && lifecycle.status === 'closing' && <button
+        className="btn btn-primary" disabled={cancelling || (!!lifecycle.purge_after && Date.now() >= Date.parse(lifecycle.purge_after))}
+        onClick={async () => {
+          setCancelling(true); setLifecycleError(null);
+          try { setLifecycle(await organizationApi.cancelClosure()); }
+          catch (error: any) { setLifecycleError(error.response?.data?.detail ?? 'Unable to cancel closure. Please try again.'); }
+          finally { setCancelling(false); }
+        }}>{cancelling ? 'Cancelling…' : 'Cancel closure'}</button>}
+      <button className="btn btn-secondary" onClick={() => signOut()}>Sign out</button>
+    </section>
+  </main>;
 
   return (
     <div className={`app-layout ${mobileOpen ? 'app-layout--drawer-open' : ''}`}>
@@ -187,7 +236,7 @@ export const Layout: React.FC = () => {
           {permissions.includes('member:manage') && (
             <li><Link to="/members" className={`nav-link ${isActive('/members') ? 'active' : ''}`} title={navCollapsed ? 'Members' : undefined}><Users size={20} /><span>Members</span></Link></li>
           )}
-          {permissions.includes('sso:manage') && (
+          {['sso:manage', 'member:manage', 'organization:close'].some((permission) => permissions.includes(permission)) && (
             <li><Link to="/organization-settings" className={`nav-link ${isActive('/organization-settings') ? 'active' : ''}`} title={navCollapsed ? 'Organization settings' : undefined}><Settings size={20} /><span>Organization settings</span></Link></li>
           )}
         </ul>

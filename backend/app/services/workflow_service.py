@@ -285,6 +285,33 @@ def delete_job(db, job_id):
     return job
 
 
+
+def cancel_organization_extractions(db, org_id):
+    job_ids = db.scalars(select(ExtractionJob.job_id).where(
+        ExtractionJob.org_id == org_id,
+        ExtractionJob.job_id.in_(select(ExtractionAttempt.job_id).where(
+            ExtractionAttempt.org_id == org_id, ExtractionAttempt.status.in_(ACTIVE))))
+        .order_by(ExtractionJob.job_id)).all()
+    for job_id in job_ids:
+        job = db.scalar(select(ExtractionJob).where(ExtractionJob.job_id == job_id)
+                        .with_for_update().execution_options(populate_existing=True))
+        attempts = db.scalars(select(ExtractionAttempt).where(
+            ExtractionAttempt.job_id == job_id, ExtractionAttempt.status.in_(ACTIVE))
+            .order_by(ExtractionAttempt.attempt_id).with_for_update()
+            .execution_options(populate_existing=True)).all()
+        for attempt in attempts:
+            _settle_quota(db, job, attempt, False)
+            attempt.status = 'cancelled'
+            attempt.completed_at = now(db)
+            attempt.error_code = 'ORGANIZATION_CLOSING'
+            attempt.error_message = 'Extraction cancelled because the organization is closing.'
+            if job.selected_attempt_id == attempt.attempt_id:
+                job.status = 'cancelled'
+                job.failed_at = attempt.completed_at
+                job.error = attempt.error_code
+                job.message = attempt.error_message
+    db.flush()
+
 def lease_dispatch(db):
     timestamp = now(db)
     row = db.scalar(select(WorkflowOutbox).join(ExtractionAttempt).join(ExtractionJob).where(WorkflowOutbox.acknowledged_at.is_(None), WorkflowOutbox.next_delivery_at <= timestamp, (WorkflowOutbox.lease_until.is_(None) | (WorkflowOutbox.lease_until <= timestamp)), ExtractionAttempt.status.in_(ACTIVE), ExtractionAttempt.deadline_at > timestamp, ExtractionJob.deleted_at.is_(None), ExtractionJob.selected_attempt_id == WorkflowOutbox.attempt_id).order_by(WorkflowOutbox.next_delivery_at).with_for_update(skip_locked=True, of=WorkflowOutbox).limit(1))

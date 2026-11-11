@@ -7,4 +7,6 @@ from .extraction_quota import GlobalQuota, OrganizationQuota, QuotaReservation, 
 
 from .provisioning_intent import ProvisioningIntent
 
+from .organization_lifecycle import OrganizationLifecycle
+
 __all__ = ["Party", "Contract", "contract_parties", "ExtractionJob"]

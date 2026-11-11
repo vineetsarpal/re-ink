@@ -52,7 +52,7 @@ const App: React.FC = () => {
               <Route element={<RequirePermission permission="member:manage" />}>
                 <Route path="/members" element={<MembersPage />} />
               </Route>
-              <Route element={<RequirePermission permission="sso:manage" />}>
+              <Route element={<RequirePermission permission={["sso:manage", "member:manage", "organization:close"]} />}>
                 <Route path="/organization-settings" element={<OrganizationSettingsPage />} />
               </Route>
             </Route>

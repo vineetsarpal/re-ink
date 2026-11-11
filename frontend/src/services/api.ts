@@ -75,6 +75,11 @@ api.interceptors.request.use(async (config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    if (error.response?.status === 423 && error.response.data?.detail?.code === 'ORGANIZATION_CLOSING') {
+      window.dispatchEvent(new CustomEvent('organization-lifecycle', {
+        detail: { status: 'closing', purge_after: error.response.data.detail.purge_after },
+      }));
+    }
     if (error.response?.status === 401 && onUnauthorized && !reauthTriggered) {
       reauthTriggered = true;
       onUnauthorized();
@@ -415,3 +420,23 @@ export const reviewApi = {
 };
 
 export default api;
+
+
+export interface OrganizationLifecycle {
+  status: 'active' | 'closing' | 'purged';
+  purge_after: string | null;
+}
+
+export const organizationApi = {
+  lifecycle: async (): Promise<OrganizationLifecycle> => (await api.get('/organization/lifecycle')).data,
+  close: async (confirm: string): Promise<OrganizationLifecycle> => {
+    const response = (await api.post('/organization/close', { confirm })).data;
+    window.dispatchEvent(new CustomEvent('organization-lifecycle', { detail: response }));
+    return response;
+  },
+  cancelClosure: async (): Promise<OrganizationLifecycle> => {
+    const response = (await api.post('/organization/cancel-closure')).data;
+    window.dispatchEvent(new CustomEvent('organization-lifecycle', { detail: response }));
+    return response;
+  },
+};
