@@ -1,3 +1,4 @@
+import { PREPARATION_FAILED, TRIAL_CAPACITY_UNAVAILABLE, TRIAL_CAPACITY_MESSAGE } from './errors.mjs';
 // This module requires a durable coordinator; it is not wired to a deployment.
 export const MAX_EVENT = 5 * 1024 * 1024;
 // Bounded backoff (4 attempts, ~4.25s of waiting) for idempotent backend calls.
@@ -61,7 +62,8 @@ export async function consumeBatch(batch, services, { sleep = wait, delays = RET
       } catch (error) {
         // The one-shot claim is spent, so a pre-provider failure is recorded rather than redelivered.
         event = { ...event, status: 'failed', error: error?.preProvider === true
-          ? { code: 'PREPARATION_FAILED', message: 'Document preparation failed before provider processing.', retryable: error.retryable === true }
+          ? { code: error.code === TRIAL_CAPACITY_UNAVAILABLE ? TRIAL_CAPACITY_UNAVAILABLE : PREPARATION_FAILED,
+            message: error.code === TRIAL_CAPACITY_UNAVAILABLE ? TRIAL_CAPACITY_MESSAGE : 'Document preparation failed before provider processing.', retryable: error.retryable === true }
           : { code: 'EXTRACTION_FAILED', message: 'Document extraction failed.', retryable: false } };
       }
       if (!await confirmed(() => services.checkpoint(message.body, claim.checkpoint_token, event), sleep, delays)) {

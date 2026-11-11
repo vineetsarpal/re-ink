@@ -12,8 +12,10 @@ test('processes a queue delivery through authenticated backend and LandingAI wit
   const calls = [];
   const fetchImpl = async (url, init = {}) => {
     calls.push([url, init]);
+    if (url.endsWith('/protocol')) return json({ protocol_version: '2' });
     if (url.endsWith('/claim')) return json({ decision: 'start', checkpoint_token: 'claim-token' });
     if (url.endsWith('/credential')) return json({ api_key: 'customer-secret' });
+    if (url.endsWith('/provider-start')) return json({ authorized: true });
     if (url.endsWith('/document')) return new Response('%PDF-fake', { headers: { 'content-type': 'application/pdf' } });
     if (url.endsWith('/ade/parse')) return json({ markdown: 'Treaty', chunks: [], grounding: {}, metadata: { version: 'parse-v1' } });
     if (url.endsWith('/ade/extract')) {
@@ -53,8 +55,10 @@ test('an oversized document is rejected before any provider call', async () => {
   const calls = [];
   const fetchImpl = async (url, init = {}) => {
     calls.push([url, init]);
+    if (url.endsWith('/protocol')) return json({ protocol_version: '2' });
     if (url.endsWith('/claim')) return json({ decision: 'start', checkpoint_token: 'claim-token' });
     if (url.endsWith('/credential')) return json({ api_key: 'customer-secret' });
+    if (url.endsWith('/provider-start')) return json({ authorized: true });
     if (url.endsWith('/document')) return new Response('x', { headers: { 'content-type': 'application/pdf', 'content-length': String(6 * 1024 * 1024) } });
     if (url.endsWith('/checkpoint')) { assert.equal(JSON.parse(init.body).status, 'failed'); return json({ stored: true }); }
     if (url.endsWith('/deliver')) return json({ schema_version: '1', event_id: 'terminal', status: 'acknowledged' });
@@ -103,8 +107,10 @@ function backend(overrides = {}) {
   const fetchImpl = async (url, init = {}) => {
     calls.push([url, init]);
     for (const [suffix, handler] of Object.entries(overrides)) if (url.endsWith(suffix)) { const r = await handler(calls.filter(([u]) => u.endsWith(suffix)).length, init); if (r) return r; }
+    if (url.endsWith('/protocol')) return json({ protocol_version: '2' });
     if (url.endsWith('/claim')) return json({ decision: 'start', checkpoint_token: 'claim-token' });
     if (url.endsWith('/credential')) return json({ api_key: 'customer-secret' });
+    if (url.endsWith('/provider-start')) return json({ authorized: true });
     if (url.endsWith('/document')) return new Response('%PDF-fake', { headers: { 'content-type': 'application/pdf' } });
     if (url.endsWith('/ade/parse')) return json({ markdown: 'Treaty', chunks: [], grounding: {}, metadata: { version: 'parse-v1' } });
     if (url.endsWith('/ade/extract')) return json({ extraction: { contract_name: 'Treaty', contract_type: 'Treaty', cedant_name: 'Cedant', reinsurer_name: 'Reinsurer' }, metadata: { version: 'extract-v1' } });
@@ -122,7 +128,7 @@ test('every queue-path request carries a timeout signal', async () => {
   const item = message();
   await runQueue({ messages: [item] }, env, fetchImpl, options);
   assert.equal(item.acked, true);
-  assert.equal(calls.length, 7);
+  assert.equal(calls.length, 9);
   for (const [url, init] of calls) assert.ok(init.signal instanceof AbortSignal, url);
 });
 
@@ -220,4 +226,46 @@ test('scheduled maintenance treats a redirect as failure instead of following it
     ? new Response(null, { status: 302, headers: { Location: 'https://elsewhere.example/' } })
     : json(url.endsWith('/cloudflare-dispatch') ? { attempted: 0 } : { processed: 0 }), line => lines.push(line)), /MAINTENANCE_FAILED/);
   assert.deepEqual(lines.map(line => JSON.parse(line)), [{ event: 'maintenance_failed', route: 'expiry', status: 302 }]);
+});
+
+
+test('provider authorization happens after preparation and before any provider request', async () => {
+  const { calls, fetchImpl, count } = backend({ '/provider-start': () => json({ authorized: true }) });
+  await runQueue({ messages: [message()] }, env, fetchImpl, options);
+  assert.equal(count('/provider-start'), 1);
+  const urls = calls.map(([url]) => url);
+  assert.ok(urls.findIndex(url => url.endsWith('/document')) < urls.findIndex(url => url.endsWith('/provider-start')));
+  assert.ok(urls.findIndex(url => url.endsWith('/provider-start')) < urls.findIndex(url => url.endsWith('/ade/parse')));
+});
+
+test('ambiguous provider authorization is never retried and checkpoints a terminal failure', async () => {
+  const { fetchImpl, count, checkpointed } = backend({ '/provider-start': () => { throw new TypeError('lost authorization response'); } });
+  const item = message();
+  await runQueue({ messages: [item] }, env, fetchImpl, options);
+  assert.equal(count('/provider-start'), 1);
+  assert.equal(count('/ade/parse'), 0);
+  assert.equal(checkpointed().error.retryable, false);
+  assert.equal(item.acked, true);
+});
+
+for (const response of [() => new Response('missing', { status: 404 }), () => json({ protocol_version: '1' })]) {
+  test('incompatible backend refuses work before claim or provider calls', async () => {
+    const { fetchImpl, count } = backend({ '/protocol': response });
+    const item = message();
+    await runQueue({ messages: [item] }, env, fetchImpl, options);
+    assert.equal(count('/claim'), 0);
+    assert.equal(count('/provider-start'), 0);
+    assert.equal(count('/ade/parse'), 0);
+    assert.equal(item.retried, true);
+  });
+}
+
+test('trial capacity denial is a retryable pre-provider failure', async () => {
+  const { fetchImpl, count, checkpointed } = backend({ '/provider-start': () => new Response('capacity', { status: 429 }) });
+  const item = message();
+  await runQueue({ messages: [item] }, env, fetchImpl, options);
+  assert.equal(count('/provider-start'), 1);
+  assert.equal(count('/ade/parse'), 0);
+  assert.deepEqual(checkpointed().error, { code: 'TRIAL_CAPACITY_UNAVAILABLE', message: 'Free extractions are temporarily unavailable. Add a LandingAI key or try again later.', retryable: true });
+  assert.equal(item.acked, true);
 });

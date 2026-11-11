@@ -18,8 +18,8 @@ from app.schemas.workflow import parse_workflow_event
 from app.services.workflow_service import ACTIVE, _expire, _lock, _start
 
 
-def claim_provider_call(db, job_id: str, attempt_id: str) -> dict:
-    """Atomically grant the single provider-call authorization for an attempt."""
+def claim_preparation(db, job_id: str, attempt_id: str) -> dict:
+    """Atomically grant the single preparation claim for an attempt."""
     job, attempt = _lock(db, job_id, attempt_id, machine=True)
     _expire(db, job, attempt)
     execution = db.get(CloudflareExecution, attempt_id)
@@ -32,10 +32,7 @@ def claim_provider_call(db, job_id: str, attempt_id: str) -> dict:
     if attempt.execution_key is not None:
         return {"decision": "closed"}
     reservation = db.get(QuotaReservation, (job.org_id, attempt_id))
-    if reservation is not None:
-        start_provider_call(db, job.org_id, attempt_id,
-                            global_trial_call_limit=settings.EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT)
-    elif settings.EXTRACTION_QUOTA_ENABLED:
+    if reservation is None:
         raise HTTPException(409, "Extraction reservation unavailable")
     token = secrets.token_urlsafe(32)
     digest = hashlib.sha256(token.encode()).hexdigest()
@@ -61,6 +58,10 @@ def checkpoint_terminal_event(db, job_id: str, attempt_id: str, token: str, body
     supplied_digest = hashlib.sha256(token.encode()).hexdigest()
     if not execution or not secrets.compare_digest(execution.token_digest, supplied_digest):
         raise HTTPException(403, "Invalid checkpoint credential")
+    if event.status == "completed":
+        reservation = db.get(QuotaReservation, (job.org_id, attempt_id))
+        if reservation is None or not reservation.provider_started:
+            raise HTTPException(409, "Completion requires a counted provider start")
     payload = event.model_dump(mode="json", exclude_unset=True)
     if execution.terminal_event is not None and execution.terminal_event != payload:
         raise HTTPException(409, "Terminal checkpoint conflict")
@@ -82,3 +83,15 @@ def authorize_provider_access(db, job_id: str, attempt_id: str, token: str) -> s
             not attempt.execution_key or not secrets.compare_digest(attempt.execution_key, supplied)):
         raise HTTPException(403, "Invalid checkpoint credential")
     return supplied
+
+
+def authorize_provider_start(db, job_id: str, attempt_id: str, token: str) -> bool:
+    if authorize_provider_access(db, job_id, attempt_id, token) is None:
+        return False
+    job, _ = _lock(db, job_id, attempt_id, machine=True)
+    reservation = db.get(QuotaReservation, (job.org_id, attempt_id))
+    if reservation is None or reservation.provider_started:
+        raise HTTPException(409, "Provider authorization unavailable")
+    start_provider_call(db, job.org_id, attempt_id,
+                        global_trial_call_limit=settings.EXTRACTION_GLOBAL_TRIAL_CALL_MONTHLY_LIMIT)
+    return True

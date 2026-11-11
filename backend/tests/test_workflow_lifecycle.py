@@ -10,7 +10,7 @@ from app.models.workflow import ExtractionAttempt, WorkflowOutbox, WorkflowRecei
 from app.services import workflow_service as svc
 from app.schemas.workflow import EVENT_ADAPTER
 from app.core.config import settings
-from app.services.extraction_quota import quota_usage
+from app.services.extraction_quota import quota_usage, start_provider_call
 
 
 @pytest.fixture
@@ -77,6 +77,7 @@ def test_quota_reservation_tracks_success_and_failure(sessions, monkeypatch):
     first = create(db, org)
     second = create(db, org)
     assert quota_usage(db, org).pending == 2
+    start_provider_call(db, org, first.selected_attempt_id, global_trial_call_limit=100)
     svc.ingest_event(db, event_for(first))
     svc.ingest_event(db, event_for(second, "failed"))
     usage = quota_usage(db, org)
@@ -127,6 +128,7 @@ def test_queued_attempt_keeps_its_credential_after_replacement(sessions, monkeyp
     with pytest.raises(HTTPException):
         get_attempt_credential(db, job.job_id, job.selected_attempt_id, "other-worker")
     assert get_attempt_credential(db, job.job_id, job.selected_attempt_id, "worker-owner") == "first-key"
+    start_provider_call(db, org, job.selected_attempt_id, global_trial_call_limit=100)
     svc.ingest_event(db, event_for(job))
     from app.models.extraction_quota import QuotaReservation
     assert db.get(QuotaReservation, (org, job.selected_attempt_id)).credential_snapshot is None

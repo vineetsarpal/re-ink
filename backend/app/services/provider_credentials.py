@@ -46,3 +46,9 @@ def decrypt_credential(ciphertext: bytes, org_id: str, provider: str, encoded_ke
         return _cipher(encoded_key).decrypt(ciphertext[:12], ciphertext[12:], _associated_data(org_id, provider)).decode()
     except (InvalidTag, UnicodeDecodeError) as exc:
         raise CredentialEncryptionError("Credential authentication failed") from exc
+
+
+def credentials_available(user) -> bool:
+    from app.core.config import settings
+    return bool(settings.CLOUDFLARE_TRIAL_ENABLED and user.org_id
+                and user.org_id in settings.TRIAL_ALLOWED_ORGANIZATION_IDS)

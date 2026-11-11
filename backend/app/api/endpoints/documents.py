@@ -26,7 +26,7 @@ from app.services.landingai_service import landingai_service
 from app.models.extraction_job import ExtractionJob
 from app.models.provider_acknowledgment import LANDINGAI_NOTICE_VERSION, ProviderAcknowledgment
 from app.services.private_document_service import private_document_service
-from app.services.workflow_service import create_workflow_job, delete_job, expire_job, precheck_upload, retry_job
+from app.services.workflow_service import create_workflow_job, delete_job, expire_job, precheck_upload, retry_job, can_retry_job, require_retry_access
 from app.services.upload_intents import begin_upload, complete_upload, discard_upload
 from app.services.extraction_quota import quota_usage
 from app.api.endpoints import provider_credentials
@@ -259,7 +259,10 @@ async def get_extraction_status(
                 except Exception as parse_error:
                     logger.error(f"Error parsing raw results: {str(parse_error)}")
 
+    can_retry = can_retry_job(db, job, user)
     return DocumentExtractionStatus(
+        error_code=job.error if job.selected_attempt_id else None,
+        can_retry=can_retry,
         job_id=job.job_id,
         status=job.status,
         message=job.message,
@@ -357,15 +360,12 @@ async def get_source_document(
 @router.post("/{job_id}/retry", response_model=DocumentUploadResponse)
 def retry_document(job_id: str, db: Session = Depends(get_tenant_db),
                    user: CurrentUser = Depends(require_permission("document:upload"))):
-    provider_credentials.require_credentials_available(user)
-    notice = db.get(ProviderAcknowledgment, (user.org_id, "landingai"))
-    if not notice or notice.notice_version != LANDINGAI_NOTICE_VERSION:
-        raise HTTPException(403, "Acknowledge LandingAI processing before uploading")
+    require_retry_access(db, user)
     job = db.query(ExtractionJob).filter(ExtractionJob.job_id == job_id,
             ExtractionJob.selected_attempt_id.isnot(None), ExtractionJob.deleted_at.is_(None)).first()
     if not job:
         raise HTTPException(404, "Job not found")
-    job = retry_job(db, job_id)
+    job = retry_job(db, job_id, user)
     response = DocumentUploadResponse(job_id=job.job_id, filename=job.filename, file_path="",
                                       message=job.message or "Queued for extraction", status=job.status)
     db.commit()

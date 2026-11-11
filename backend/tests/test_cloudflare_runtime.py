@@ -11,6 +11,7 @@ URL = "postgresql://user:pass@localhost:5432/pool_sizing_only"
 @pytest.fixture(autouse=True)
 def enabled(monkeypatch):
     monkeypatch.setattr(settings, "CLOUDFLARE_ENABLED", True)
+    monkeypatch.setattr(settings, "EXTRACTION_QUOTA_ENABLED", True)
     monkeypatch.setattr(settings, "CLOUDFLARE_MACHINE_DATABASE_URL", URL)
     for name in ("CLOUDFLARE_MACHINE_POOL_SIZE", "CLOUDFLARE_MACHINE_POOL_MAX_OVERFLOW",
                  "CLOUDFLARE_MACHINE_POOL_TIMEOUT_SECONDS"):

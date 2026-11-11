@@ -13,7 +13,7 @@ from app.core.config import settings
 def test_incomplete_cloudflare_configuration_cannot_start():
     from app.core.config import Settings
     with pytest.raises(ValidationError):
-        Settings(_env_file=None, DATABASE_URL="postgresql://app@localhost/db", CLOUDFLARE_ENABLED=True)
+        Settings(_env_file=None, DATABASE_URL="postgresql://app@localhost/db", CLOUDFLARE_ENABLED=True, EXTRACTION_QUOTA_ENABLED=True)
     with pytest.raises(ValidationError):
         Settings(_env_file=None, DATABASE_URL="postgresql://app@localhost/db", CLOUDFLARE_TRIAL_ENABLED=True)
 
@@ -23,6 +23,7 @@ def _cloudflare_options():
             for role in ("machine", "dispatch", "expiry", "cleanup")]
     return dict(
         DATABASE_URL="postgresql://app@db.neon.tech/reink_db", CLOUDFLARE_ENABLED=True,
+        EXTRACTION_QUOTA_ENABLED=True,
         CLOUDFLARE_MACHINE_DATABASE_URL=urls[0], CLOUDFLARE_DISPATCH_DATABASE_URL=urls[1],
         CLOUDFLARE_EXPIRY_DATABASE_URL=urls[2], CLOUDFLARE_CLEANUP_DATABASE_URL=urls[3],
         CLOUDFLARE_MACHINE_TOKEN="a" * 32, CLOUDFLARE_DISPATCH_TOKEN="b" * 32,
@@ -171,11 +172,12 @@ def test_five_free_completions_then_customer_key(as_org, db_session, monkeypatch
             db_session.expire_all()
             attempt_id = db_session.get(ExtractionJob, job_id).selected_attempt_id
             base = f"/api/cloudflare/jobs/{job_id}/attempts/{attempt_id}"
-            claim = client.post(base + "/claim")
+            claim = client.post(base + "/claim", headers={"X-Extraction-Protocol": "2"})
             assert claim.status_code == 200, claim.text
             token = claim.json()["checkpoint_token"]
             headers = {"X-Checkpoint-Token": token}
             assert client.get(base + "/credential", headers=headers).json() == {"api_key": expected_key}
+            assert client.post(base + "/provider-start", headers=headers).status_code == 200
             event = {"schema_version": "1", "job_id": job_id, "attempt_id": attempt_id,
                      "event_id": "terminal", "status": "completed",
                      "result": {"contract_data": {"contract_name": "Synthetic treaty"}, "parties_data": []}}
@@ -206,7 +208,7 @@ def test_five_free_completions_then_customer_key(as_org, db_session, monkeypatch
         db_session.expire_all()
         attempt_id = db_session.get(ExtractionJob, job_id).selected_attempt_id
         base = f"/api/cloudflare/jobs/{job_id}/attempts/{attempt_id}"
-        token = client.post(base + "/claim").json()["checkpoint_token"]
+        token = client.post(base + "/claim", headers={"X-Extraction-Protocol": "2"}).json()["checkpoint_token"]
         event = {"schema_version": "1", "job_id": job_id, "attempt_id": attempt_id,
                  "event_id": "terminal", "status": "failed",
                  "error": {"code": "EXTRACTION_FAILED", "message": "Extraction failed.", "retryable": True}}
@@ -218,3 +220,12 @@ def test_five_free_completions_then_customer_key(as_org, db_session, monkeypatch
         assert client.post(f"/api/documents/{job_id}/retry").status_code == 409
     finally:
         app.dependency_overrides.pop(machine_db, None)
+
+
+def test_cloudflare_transport_requires_quotas_even_without_trial():
+    from app.core.config import Settings
+
+    options = _cloudflare_options()
+    options.update(CLOUDFLARE_TRIAL_ENABLED=False, EXTRACTION_QUOTA_ENABLED=False)
+    with pytest.raises(ValidationError, match="CLOUDFLARE_ENABLED requires EXTRACTION_QUOTA_ENABLED"):
+        Settings(_env_file=None, **options)

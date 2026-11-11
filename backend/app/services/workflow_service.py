@@ -35,13 +35,13 @@ def _quota_limits():
                 per_minute_limit=settings.EXTRACTION_ATTEMPTS_PER_MINUTE)
 
 
-def precheck_upload(db, org_id):
+def precheck_upload(db, org_id, *, read_only=False):
     """Reject over-quota uploads before any storage write; caller commits."""
     if not _setting("EXTRACTION_QUOTA_ENABLED", False):
         return
     has_key = db.scalar(select(ProviderCredential.org_id).where(
         ProviderCredential.org_id == org_id, ProviderCredential.provider == "landingai")) is not None
-    precheck_extraction(db, org_id, has_customer_key=has_key, at=now(db), **_quota_limits())
+    precheck_extraction(db, org_id, has_customer_key=has_key, at=now(db), read_only=read_only, **_quota_limits())
 
 
 def _new_attempt(db, job, number):
@@ -211,11 +211,45 @@ def ingest_event(db, event, *, machine=False):
     return ack
 
 
-def retry_job(db, job_id):
+def require_retry_access(db, user):
+    from app.models.provider_acknowledgment import ProviderAcknowledgment, LANDINGAI_NOTICE_VERSION
+    from app.services.provider_credentials import credentials_available
+
+    if "document:upload" not in user.permissions:
+        raise HTTPException(403, "Document upload permission required")
+    if not credentials_available(user):
+        raise HTTPException(503, "Customer provider keys are not available yet")
+    notice = db.get(ProviderAcknowledgment, (user.org_id, "landingai"))
+    if not notice or notice.notice_version != LANDINGAI_NOTICE_VERSION:
+        raise HTTPException(403, "Acknowledge LandingAI processing before uploading")
+
+
+def require_retry_eligible(db, job, user=None):
+    """Shared retry policy. Quota inspection never creates or changes counters."""
+    from app.models.cloudflare_execution import CloudflareExecution
+    if not job.selected_attempt_id or job.deleted_at or job.status not in {"failed", "timed_out"}:
+        raise HTTPException(409, "Only failed or timed-out jobs can be retried")
+    execution = db.get(CloudflareExecution, job.selected_attempt_id)
+    error = (execution.terminal_event or {}).get("error", {}) if execution else {}
+    if error.get("retryable") is False:
+        raise HTTPException(409, "This extraction failure cannot be retried")
+    if user is not None:
+        require_retry_access(db, user)
+    precheck_upload(db, job.org_id, read_only=True)
+
+
+def can_retry_job(db, job, user):
+    try:
+        require_retry_eligible(db, job, user)
+    except HTTPException:
+        return False
+    return True
+
+
+def retry_job(db, job_id, user=None):
     job, attempt = _lock(db, job_id)
     _expire(db, job, attempt)
-    if job.status not in {"failed", "timed_out"}:
-        raise HTTPException(409, "Only failed or timed-out jobs can be retried")
+    require_retry_eligible(db, job, user)
     _new_attempt(db, job, attempt.number + 1)
     return job
 

@@ -113,6 +113,8 @@ export interface ExtractionResult {
 }
 
 export interface DocumentExtractionStatus {
+  error_code?: string | null;
+  can_retry?: boolean;
   job_id: string;
   status: string;
   message?: string;
