@@ -105,12 +105,22 @@ recent maintenance execution outcomes were not checked. The customer-key
 feature is intentionally disabled in the code until that work is complete.
 Account deletion remains disabled pending separate closure safeguards.
 
-Public signup controls must be checked in the actual WorkOS environment. The
-global start limit bounds trial calls, but per-organization limits alone do not
-prevent repeated signups. Organization provisioning serializes concurrent
-requests for the same user, but a crash or ambiguous WorkOS failure after an
-organization is created can still leave an orphan or duplicate; establish a
-reconciliation procedure before public launch.
+### WorkOS production settings
+
+Recorded 2026-11-11 (#60):
+
+- **Sign-up:** public sign-up is on.
+- **Email verification:** always on in AuthKit and not configurable. It covers
+  OAuth and SSO; SSO users on a verified organization domain count as verified.
+  Trial domain claims rely on this.
+- **Radar:** enabled with default settings.
+- **RBAC:** `organization:close` is assigned to the admin role, alongside
+  `sso:manage` and `member:manage`. Organizations with their own custom roles
+  need it added to their admin role too.
+
+Repeated sign-ups are bounded by Radar, one trial per user and per non-webmail
+domain, and the global trial caps. Orphan or duplicate organizations are
+handled by the orphan report below.
 
 Expired uploads keep tombstones that are revisited for late storage writes
 every 24 hours. Once a successful rescan happens at least 7 days after the
