@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { agentApi, contractApi } from '@/services/api';
 import type { AutomatedReviewResponse, ContractWithParties } from '@/types';
+import { formatDate as formatDisplayDate } from '@/utils/dates';
 
 export const ContractDetailPage: React.FC = () => {
   const { permissions } = useAuth();
@@ -237,11 +238,11 @@ export const ContractDetailPage: React.FC = () => {
   }
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
+    return formatDisplayDate(dateString, {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
-    });
+    }, 'en-US');
   };
 
   const formatCurrency = (amount?: number, currency = 'USD') => {

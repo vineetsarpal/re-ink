@@ -10,6 +10,7 @@ from app.core.auth import require_permission
 from app.core.tenancy import get_tenant_db
 from app.models.contract import Contract, contract_parties
 from app.models.party import Party
+from app.models.extraction_job import ExtractionJob
 from app.schemas.document import ReviewData, ReviewApprovalResponse
 
 router = APIRouter()
@@ -35,6 +36,19 @@ def approve_extracted_data(
         logger.info("=== Starting approve_extracted_data ===")
         logger.info(f"Received {len(review_data.parties)} parties")
         logger.info(f"Contract data: {review_data.contract.model_dump()}")
+
+        # Resolve provenance from the tenant-scoped job, never from client
+        # filenames, storage paths or confidence values.
+        source_job = None
+        if review_data.job_id is not None:
+            source_job = db.query(ExtractionJob).filter(
+                ExtractionJob.job_id == review_data.job_id,
+                ExtractionJob.deleted_at.is_(None),
+            ).first()
+            if source_job is None:
+                raise HTTPException(status_code=404, detail="Source document not found")
+            if source_job.status != "completed" or not source_job.parsed_results:
+                raise HTTPException(status_code=409, detail="Source extraction is not complete")
 
         # Check if contract already exists by contract_number
         existing_contract = None
@@ -107,6 +121,12 @@ def approve_extracted_data(
 
         contract.is_manually_created = False
 
+        if source_job is not None:
+            contract.extraction_job_id = source_job.job_id
+            contract.source_document_name = source_job.filename
+            contract.source_document_path = source_job.file_path
+            contract.extraction_confidence = source_job.parsed_results.get("confidence_score")
+
         db.add(contract)
         db.flush()
 
@@ -147,12 +167,12 @@ def approve_extracted_data(
     except HTTPException:
         db.rollback()
         raise
-    except Exception as e:
+    except Exception:
         db.rollback()
-        logger.error(f"Error approving extracted data: {str(e)}")
+        logger.exception("Error approving extracted data")
         raise HTTPException(
             status_code=500,
-            detail=f"Error creating contract and parties: {str(e)}"
+            detail="Unable to save the reviewed contract. Please try again."
         )
 
 

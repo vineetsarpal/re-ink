@@ -65,6 +65,7 @@ const CONTRACT_LABELS: Record<string, string> = Object.fromEntries(
 );
 
 interface ReviewFormProps {
+  jobId?: string;
   extractionResult: ExtractionResult;
   /** Original document source; protected backend files require a Bearer token. */
   documentSource?: DocumentFileSource | null;
@@ -78,6 +79,7 @@ interface ReviewFormProps {
 }
 
 export const ReviewForm: React.FC<ReviewFormProps> = ({
+  jobId,
   extractionResult,
   documentSource = null,
   agentAnalysis,
@@ -315,6 +317,7 @@ export const ReviewForm: React.FC<ReviewFormProps> = ({
       });
 
       const reviewData: ReviewData = {
+        job_id: jobId,
         contract: cleanedContract,
         parties: partyActions,
       };

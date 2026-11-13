@@ -292,6 +292,7 @@ export const UploadPage: React.FC = () => {
 
         {currentStep === 'review' && extractionStatus?.result && (
           <ReviewForm
+            jobId={uploadResponse?.job_id}
             extractionResult={extractionStatus.result}
             documentSource={resolveDocumentSource(uploadResponse, isMockJob, extractionStatus)}
             onApprove={handleApprove}

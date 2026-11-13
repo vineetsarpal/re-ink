@@ -63,6 +63,7 @@ class DocumentExtractionStatus(BaseModel):
 
 class ReviewData(BaseModel):
     """Schema for reviewing and confirming extracted data."""
+    job_id: Optional[str] = None
     contract: ContractCreate
     parties: List[PartyAction]  # Per-party: link to existing or create new
 

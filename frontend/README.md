@@ -168,3 +168,14 @@ The project uses TypeScript for full type safety. All API types are defined in `
 ```bash
 npm run lint
 ```
+
+### Regression Tests
+
+With Node.js 22.18+ (native TypeScript support):
+
+```bash
+npm test
+```
+
+Date regression tests check calendar dates and timestamps across UTC, Toronto,
+Honolulu, and Kolkata time zones.

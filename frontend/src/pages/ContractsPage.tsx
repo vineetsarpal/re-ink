@@ -7,6 +7,7 @@ import { createColumnHelper, flexRender, getCoreRowModel, useReactTable } from '
 import { Search, Filter, Plus } from 'lucide-react';
 import { contractApi } from '@/services/api';
 import type { Contract } from '@/types';
+import { formatDate } from '@/utils/dates';
 
 const contractColumnHelper = createColumnHelper<Contract>();
 
@@ -70,11 +71,11 @@ export const ContractsPage: React.FC = () => {
     }),
     contractColumnHelper.accessor('effective_date', {
       header: 'Effective Date',
-      cell: ({ getValue }) => new Date(getValue()).toLocaleDateString(),
+      cell: ({ getValue }) => formatDate(getValue()),
     }),
     contractColumnHelper.accessor('expiration_date', {
       header: 'Expiration Date',
-      cell: ({ getValue }) => new Date(getValue()).toLocaleDateString(),
+      cell: ({ getValue }) => formatDate(getValue()),
     }),
     contractColumnHelper.display({
       id: 'premium_amount',

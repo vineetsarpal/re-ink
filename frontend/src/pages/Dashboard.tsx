@@ -7,6 +7,7 @@ import { createColumnHelper, flexRender, getCoreRowModel, useReactTable } from '
 import { FileText, Users, Plus, TrendingUp } from 'lucide-react';
 import { contractApi, partyApi } from '@/services/api';
 import type { Contract, Party } from '@/types';
+import { formatDate } from '@/utils/dates';
 
 const contractColumnHelper = createColumnHelper<Contract>();
 
@@ -66,7 +67,7 @@ export const Dashboard: React.FC = () => {
     }),
     contractColumnHelper.accessor('effective_date', {
       header: 'Effective Date',
-      cell: ({ getValue }) => new Date(getValue()).toLocaleDateString(),
+      cell: ({ getValue }) => formatDate(getValue()),
     }),
     contractColumnHelper.display({
       id: 'premium',

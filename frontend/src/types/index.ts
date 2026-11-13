@@ -141,6 +141,7 @@ export interface PartyAction {
 }
 
 export interface ReviewData {
+  job_id?: string;
   contract: Omit<Contract, 'id' | 'created_at' | 'updated_at'>;
   parties: PartyAction[];
 }
